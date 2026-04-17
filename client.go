@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -218,6 +219,99 @@ func (c *Client) Timestamp(ctx context.Context, sha256Hex string, opts *AnchorOp
 	return ts.toModel(), nil
 }
 
+// ── AI Act Audit Anchoring ────────────────────────────────────────────────────
+
+// AnchorAiDecision submits an AI decision for EU AI Act Article 12 anchoring.
+// Privacy-safe: only hashes are sent — raw inputs and outputs are never uploaded.
+// Returns immediately with a tracking ID. Use GetAiDecisionProof or
+// AnchorAiDecisionWait to retrieve the proof once anchored (~10 minutes).
+func (c *Client) AnchorAiDecision(ctx context.Context, inputHash, outputHash string, meta *AiDecisionMetadata, opts *AnchorOptions) (*AiDecisionJob, error) {
+	if meta == nil {
+		return nil, fmt.Errorf("trustbeat: AnchorAiDecision: metadata must not be nil")
+	}
+	mBody := map[string]any{
+		"model_id":        meta.ModelID,
+		"system_name":     meta.SystemName,
+		"risk_category":   meta.RiskCategory,
+		"decision_type":   meta.DecisionType,
+		"human_oversight": meta.HumanOversight,
+		"time_envelope": map[string]any{
+			"started_at":   meta.TimeEnvelope.StartedAt,
+			"completed_at": meta.TimeEnvelope.CompletedAt,
+		},
+	}
+	if meta.ModelVersion != "" {
+		mBody["model_version"] = meta.ModelVersion
+	}
+	if meta.OperatorID != "" {
+		mBody["operator_id"] = meta.OperatorID
+	}
+	if meta.DeploymentEnv != "" {
+		mBody["deployment_env"] = meta.DeploymentEnv
+	}
+	body := map[string]any{
+		"input_hash":  inputHash,
+		"output_hash": outputHash,
+		"metadata":    mBody,
+	}
+	if opts != nil && opts.CallbackURL != "" {
+		body["callback_url"] = opts.CallbackURL
+	}
+	var job aiDecisionJobWire
+	if err := c.post(ctx, "/ai/decisions/anchor", body, &job); err != nil {
+		return nil, err
+	}
+	return job.toModel(), nil
+}
+
+// GetAiDecisionProof retrieves the verification result for a previously submitted AI decision.
+// Returns (nil, nil) if the decision is still pending (not yet anchored).
+// Returns a *NotFoundError if the tracking ID is unknown.
+func (c *Client) GetAiDecisionProof(ctx context.Context, trackingID string) (*AiDecisionProof, error) {
+	path := "/ai/decisions/verify/" + url.PathEscape(trackingID)
+	var p aiDecisionProofWire
+	if err := c.get(ctx, path, &p); err != nil {
+		var nfe *NotFoundError
+		if errors.As(err, &nfe) && nfe.ErrorCode == "NOT_ANCHORED" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return p.toModel(), nil
+}
+
+// AnchorAiDecisionWait polls GetAiDecisionProof until the proof is ready, then returns it.
+// opts may be nil (defaults: 11-minute timeout, 15-second poll interval).
+func (c *Client) AnchorAiDecisionWait(ctx context.Context, trackingID string, opts *WaitOptions) (*AiDecisionProof, error) {
+	timeout, poll := 11*time.Minute, 15*time.Second
+	if opts != nil {
+		if opts.Timeout > 0 {
+			timeout = opts.Timeout
+		}
+		if opts.PollInterval > 0 {
+			poll = opts.PollInterval
+		}
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		proof, err := c.GetAiDecisionProof(ctx, trackingID)
+		if err != nil {
+			return nil, err
+		}
+		if proof != nil {
+			return proof, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("trustbeat: AnchorAiDecisionWait timed out after %v for %s", timeout, trackingID)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+}
+
 // ── File helpers ──────────────────────────────────────────────────────────────
 
 // HashFile computes the SHA-256 hash of a local file, returned as a lowercase
@@ -355,16 +449,20 @@ func withFileDesc(opts *AnchorOptions, path string) *AnchorOptions {
 
 func mapHTTPError(status int, body []byte) error {
 	msg := fmt.Sprintf("HTTP %d", status)
+	var errCode string
 	var errResp struct {
 		Error struct {
 			Message string `json:"message"`
 			Code    string `json:"code"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
-		msg = errResp.Error.Message
+	if err := json.Unmarshal(body, &errResp); err == nil {
+		if errResp.Error.Message != "" {
+			msg = errResp.Error.Message
+		}
+		errCode = errResp.Error.Code
 	}
-	base := TrustBeatError{Message: msg, Status: status}
+	base := TrustBeatError{Message: msg, Status: status, ErrorCode: errCode}
 	switch status {
 	case 401:
 		return &AuthError{base}
@@ -375,7 +473,7 @@ func mapHTTPError(status int, body []byte) error {
 	case 429:
 		return &RateLimitError{base}
 	default:
-		return &TrustBeatError{Message: msg, Status: status}
+		return &TrustBeatError{Message: msg, Status: status, ErrorCode: errCode}
 	}
 }
 
@@ -448,6 +546,90 @@ func (w *proofWire) toModel() *AnchorProof {
 	}
 	if w.Description != nil {
 		p.Description = *w.Description
+	}
+	return p
+}
+
+// ── AI Act wire types ─────────────────────────────────────────────────────────
+
+type aiDecisionJobWire struct {
+	ID           string `json:"id"`
+	InputHash    string `json:"input_hash"`
+	OutputHash   string `json:"output_hash"`
+	CombinedHash string `json:"combined_hash"`
+	Status       string `json:"status"`
+	SubmittedAt  string `json:"submitted_at"`
+	Overage      bool   `json:"overage"`
+}
+
+func (w *aiDecisionJobWire) toModel() *AiDecisionJob {
+	return &AiDecisionJob{
+		ID:           w.ID,
+		InputHash:    w.InputHash,
+		OutputHash:   w.OutputHash,
+		CombinedHash: w.CombinedHash,
+		Status:       w.Status,
+		SubmittedAt:  w.SubmittedAt,
+		Overage:      w.Overage,
+	}
+}
+
+type aiTimeEnvelopeWire struct {
+	StartedAt   string `json:"started_at"`
+	CompletedAt string `json:"completed_at"`
+}
+
+type aiDecisionMetadataWire struct {
+	ModelID        string             `json:"model_id"`
+	ModelVersion   string             `json:"model_version"`
+	SystemName     string             `json:"system_name"`
+	RiskCategory   string             `json:"risk_category"`
+	DecisionType   string             `json:"decision_type"`
+	HumanOversight bool               `json:"human_oversight"`
+	TimeEnvelope   aiTimeEnvelopeWire `json:"time_envelope"`
+	OperatorID     string             `json:"operator_id"`
+	DeploymentEnv  string             `json:"deployment_env"`
+}
+
+type aiDecisionProofWire struct {
+	ID                 string                 `json:"id"`
+	InputHash          string                 `json:"input_hash"`
+	OutputHash         string                 `json:"output_hash"`
+	CombinedHash       string                 `json:"combined_hash"`
+	Metadata           aiDecisionMetadataWire `json:"metadata"`
+	VerificationStatus string                 `json:"verification_status"`
+	AnchoredAt         *string                `json:"anchored_at"`
+	Proof              *proofWire             `json:"proof"`
+}
+
+func (w *aiDecisionProofWire) toModel() *AiDecisionProof {
+	meta := AiDecisionMetadata{
+		ModelID:        w.Metadata.ModelID,
+		ModelVersion:   w.Metadata.ModelVersion,
+		SystemName:     w.Metadata.SystemName,
+		RiskCategory:   w.Metadata.RiskCategory,
+		DecisionType:   w.Metadata.DecisionType,
+		HumanOversight: w.Metadata.HumanOversight,
+		TimeEnvelope: AiTimeEnvelope{
+			StartedAt:   w.Metadata.TimeEnvelope.StartedAt,
+			CompletedAt: w.Metadata.TimeEnvelope.CompletedAt,
+		},
+		OperatorID:    w.Metadata.OperatorID,
+		DeploymentEnv: w.Metadata.DeploymentEnv,
+	}
+	p := &AiDecisionProof{
+		ID:                 w.ID,
+		InputHash:          w.InputHash,
+		OutputHash:         w.OutputHash,
+		CombinedHash:       w.CombinedHash,
+		Metadata:           meta,
+		VerificationStatus: w.VerificationStatus,
+	}
+	if w.AnchoredAt != nil {
+		p.AnchoredAt = *w.AnchoredAt
+	}
+	if w.Proof != nil {
+		p.Proof = w.Proof.toModel()
 	}
 	return p
 }

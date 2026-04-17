@@ -7,6 +7,7 @@ type TrustBeatError struct {
 	Message   string
 	Status    int
 	RequestID string
+	ErrorCode string // API error code from the response body, e.g. "NOT_FOUND", "NOT_ANCHORED"
 }
 
 func (e TrustBeatError) Error() string {
