@@ -56,9 +56,14 @@ type AiDecisionMetadata struct {
 	DecisionType   string         // "classification", "ranking", "recommendation", etc.
 	HumanOversight bool           // true if human oversight (AI Act Article 14) was in place
 	TimeEnvelope   AiTimeEnvelope
-	ModelVersion   string         // optional — additional version string
-	OperatorID     string         // optional — identifier of the operator/process
-	DeploymentEnv  string         // optional — "production", "staging", "testing"
+	ModelVersion        string         // optional — additional version string
+	OperatorID          string         // optional — identifier of the operator/process
+	DeploymentEnv       string         // optional — "production", "staging", "testing"
+	// Art. 12 traceability fields — optional, recommended for full compliance
+	ExternalRef         string         // optional — operator's own case/record ID
+	DecisionOutcome     string         // optional — semantic result, e.g. "rejected"
+	ModelArtifactHash   string         // optional — SHA-256 of deployed model weights
+	DataSubjectCategory string         // optional — e.g. "job_applicant"
 }
 
 // AiDecisionJob is returned immediately (HTTP 202) when an AI decision is enqueued.

@@ -249,6 +249,18 @@ func (c *Client) AnchorAiDecision(ctx context.Context, inputHash, outputHash str
 	if meta.DeploymentEnv != "" {
 		mBody["deployment_env"] = meta.DeploymentEnv
 	}
+	if meta.ExternalRef != "" {
+		mBody["external_ref"] = meta.ExternalRef
+	}
+	if meta.DecisionOutcome != "" {
+		mBody["decision_outcome"] = meta.DecisionOutcome
+	}
+	if meta.ModelArtifactHash != "" {
+		mBody["model_artifact_hash"] = meta.ModelArtifactHash
+	}
+	if meta.DataSubjectCategory != "" {
+		mBody["data_subject_category"] = meta.DataSubjectCategory
+	}
 	body := map[string]any{
 		"input_hash":  inputHash,
 		"output_hash": outputHash,
@@ -580,15 +592,19 @@ type aiTimeEnvelopeWire struct {
 }
 
 type aiDecisionMetadataWire struct {
-	ModelID        string             `json:"model_id"`
-	ModelVersion   string             `json:"model_version"`
-	SystemName     string             `json:"system_name"`
-	RiskCategory   string             `json:"risk_category"`
-	DecisionType   string             `json:"decision_type"`
-	HumanOversight bool               `json:"human_oversight"`
-	TimeEnvelope   aiTimeEnvelopeWire `json:"time_envelope"`
-	OperatorID     string             `json:"operator_id"`
-	DeploymentEnv  string             `json:"deployment_env"`
+	ModelID             string             `json:"model_id"`
+	ModelVersion        string             `json:"model_version"`
+	SystemName          string             `json:"system_name"`
+	RiskCategory        string             `json:"risk_category"`
+	DecisionType        string             `json:"decision_type"`
+	HumanOversight      bool               `json:"human_oversight"`
+	TimeEnvelope        aiTimeEnvelopeWire `json:"time_envelope"`
+	OperatorID          string             `json:"operator_id"`
+	DeploymentEnv       string             `json:"deployment_env"`
+	ExternalRef         string             `json:"external_ref"`
+	DecisionOutcome     string             `json:"decision_outcome"`
+	ModelArtifactHash   string             `json:"model_artifact_hash"`
+	DataSubjectCategory string             `json:"data_subject_category"`
 }
 
 type aiDecisionProofWire struct {
@@ -614,8 +630,12 @@ func (w *aiDecisionProofWire) toModel() *AiDecisionProof {
 			StartedAt:   w.Metadata.TimeEnvelope.StartedAt,
 			CompletedAt: w.Metadata.TimeEnvelope.CompletedAt,
 		},
-		OperatorID:    w.Metadata.OperatorID,
-		DeploymentEnv: w.Metadata.DeploymentEnv,
+		OperatorID:          w.Metadata.OperatorID,
+		DeploymentEnv:       w.Metadata.DeploymentEnv,
+		ExternalRef:         w.Metadata.ExternalRef,
+		DecisionOutcome:     w.Metadata.DecisionOutcome,
+		ModelArtifactHash:   w.Metadata.ModelArtifactHash,
+		DataSubjectCategory: w.Metadata.DataSubjectCategory,
 	}
 	p := &AiDecisionProof{
 		ID:                 w.ID,
