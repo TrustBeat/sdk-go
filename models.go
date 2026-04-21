@@ -91,6 +91,65 @@ type AiDecisionProof struct {
 	Proof              *AnchorProof
 }
 
+// ── Verification models ───────────────────────────────────────────────────────
+
+// SignatureDetail holds the per-signature result within a VerificationReport.
+type SignatureDetail struct {
+	Index            int
+	SignerName        string
+	SignerEmail       string
+	SigningTime       string
+	CertSerial        string
+	CertFingerprint   string
+	CertIssuer        string
+	Qualified         bool
+	OnEutl            bool
+	Qscd              bool
+	RevocationStatus  string // "GOOD" | "REVOKED"
+	RevocationTime    string
+	OcspResponse      string
+	SignatureLevel    string // e.g. "B-LT", "B-LTA"
+	TimestampPresent  bool
+	TimestampSerial   string
+	Verdict           string // SignatureVerdict value
+}
+
+// VerificationReport is the full eIDAS signature verification report returned by VerifySignature.
+// TrackingID is set after the report is saved; use with GetVerification.
+type VerificationReport struct {
+	Verdict      string
+	Signatures   []SignatureDetail
+	DocumentHash string // SHA-256 hex of the submitted document
+	CheckedAt    string // ISO 8601
+	EutlVersion  string
+	TrackingID   string
+}
+
+// VerificationJob is returned immediately (HTTP 202) when VerifyAndAnchor is called.
+type VerificationJob struct {
+	TrackingID   string
+	DocumentHash string
+	Status       string // "pending"
+	SubmittedAt  string // ISO 8601
+}
+
+// CertificateValidationResult is returned by ValidateCertificate.
+type CertificateValidationResult struct {
+	Subject          string
+	Issuer           string
+	Serial           string
+	NotBefore        string
+	NotAfter         string
+	Qualified        bool
+	OnEutl           bool
+	Qscd             bool
+	RevocationStatus string
+	RevocationTime   string
+	KeyUsage         []string
+	Valid             bool
+	ValidatedAt      string // ISO 8601
+}
+
 // TimestampResult holds a dedicated (non-batched) RFC 3161 qualified timestamp.
 // One credit is consumed per call. Token is the raw DER-encoded TimeStampToken.
 type TimestampResult struct {

@@ -375,6 +375,181 @@ func (c *Client) AnchorFileWait(ctx context.Context, path string, opts *AnchorOp
 	return c.AnchorWait(ctx, job.ID, waitOpts)
 }
 
+// ── Signature & certificate verification ─────────────────────────────────────
+
+// VerifySignature validates eIDAS electronic signatures on a document.
+// format must be "pades", "cades", or "xades".
+// The document bytes are base64-encoded before transmission and never stored.
+func (c *Client) VerifySignature(ctx context.Context, document []byte, format string) (*VerificationReport, error) {
+	body := map[string]any{
+		"document_base64": base64.StdEncoding.EncodeToString(document),
+		"format":          format,
+	}
+	var w verificationReportWire
+	if err := c.post(ctx, "/verify/signature", body, &w); err != nil {
+		return nil, err
+	}
+	return w.toModel(), nil
+}
+
+// VerifyAndAnchor verifies eIDAS signatures and anchors the verification event.
+// Returns immediately (202) with a tracking ID. Use GetVerification to retrieve
+// the completed report once anchoring completes (~10 min).
+func (c *Client) VerifyAndAnchor(ctx context.Context, document []byte, format string) (*VerificationJob, error) {
+	body := map[string]any{
+		"document_base64": base64.StdEncoding.EncodeToString(document),
+		"format":          format,
+	}
+	var w verificationJobWire
+	if err := c.post(ctx, "/verify/signature/anchored", body, &w); err != nil {
+		return nil, err
+	}
+	return w.toModel(), nil
+}
+
+// GetVerification retrieves a saved verification report by tracking ID.
+func (c *Client) GetVerification(ctx context.Context, trackingID string) (*VerificationReport, error) {
+	var w verificationReportWire
+	if err := c.get(ctx, "/verify/"+trackingID, &w); err != nil {
+		return nil, err
+	}
+	return w.toModel(), nil
+}
+
+// ValidateCertificate validates a standalone X.509 certificate (DER or PEM)
+// against the EU Trusted List — checks chain, revocation, qualified status, and QSCD flag.
+func (c *Client) ValidateCertificate(ctx context.Context, certBytes []byte) (*CertificateValidationResult, error) {
+	body := map[string]any{
+		"certificate_base64": base64.StdEncoding.EncodeToString(certBytes),
+	}
+	var w certValidationWire
+	if err := c.post(ctx, "/validate/certificate", body, &w); err != nil {
+		return nil, err
+	}
+	return w.toModel(), nil
+}
+
+type signatureDetailWire struct {
+	Index            int     `json:"index"`
+	SignerName        *string `json:"signer_name"`
+	SignerEmail       *string `json:"signer_email"`
+	SigningTime       *string `json:"signing_time"`
+	CertSerial        *string `json:"cert_serial"`
+	CertFingerprint   *string `json:"cert_fingerprint"`
+	CertIssuer        *string `json:"cert_issuer"`
+	Qualified         bool    `json:"qualified"`
+	OnEutl            bool    `json:"on_eutl"`
+	Qscd              bool    `json:"qscd"`
+	RevocationStatus  string  `json:"revocation_status"`
+	RevocationTime    *string `json:"revocation_time"`
+	OcspResponse      *string `json:"ocsp_response"`
+	SignatureLevel    string  `json:"signature_level"`
+	TimestampPresent  bool    `json:"timestamp_present"`
+	TimestampSerial   *string `json:"timestamp_serial"`
+	Verdict           string  `json:"verdict"`
+}
+
+func derefStr(p *string) string {
+	if p == nil { return "" }
+	return *p
+}
+
+func (w *signatureDetailWire) toModel() SignatureDetail {
+	return SignatureDetail{
+		Index:            w.Index,
+		SignerName:        derefStr(w.SignerName),
+		SignerEmail:       derefStr(w.SignerEmail),
+		SigningTime:       derefStr(w.SigningTime),
+		CertSerial:        derefStr(w.CertSerial),
+		CertFingerprint:   derefStr(w.CertFingerprint),
+		CertIssuer:        derefStr(w.CertIssuer),
+		Qualified:         w.Qualified,
+		OnEutl:            w.OnEutl,
+		Qscd:              w.Qscd,
+		RevocationStatus:  w.RevocationStatus,
+		RevocationTime:    derefStr(w.RevocationTime),
+		OcspResponse:      derefStr(w.OcspResponse),
+		SignatureLevel:    w.SignatureLevel,
+		TimestampPresent:  w.TimestampPresent,
+		TimestampSerial:   derefStr(w.TimestampSerial),
+		Verdict:           w.Verdict,
+	}
+}
+
+type verificationReportWire struct {
+	Verdict      string                `json:"verdict"`
+	Signatures   []signatureDetailWire `json:"signatures"`
+	DocumentHash string                `json:"document_hash"`
+	CheckedAt    string                `json:"checked_at"`
+	EutlVersion  *string               `json:"eutl_version"`
+	TrackingID   *string               `json:"tracking_id"`
+}
+
+func (w *verificationReportWire) toModel() *VerificationReport {
+	sigs := make([]SignatureDetail, len(w.Signatures))
+	for i, s := range w.Signatures {
+		sigs[i] = s.toModel()
+	}
+	return &VerificationReport{
+		Verdict:      w.Verdict,
+		Signatures:   sigs,
+		DocumentHash: w.DocumentHash,
+		CheckedAt:    w.CheckedAt,
+		EutlVersion:  derefStr(w.EutlVersion),
+		TrackingID:   derefStr(w.TrackingID),
+	}
+}
+
+type verificationJobWire struct {
+	TrackingID   string `json:"tracking_id"`
+	DocumentHash string `json:"document_hash"`
+	Status       string `json:"status"`
+	SubmittedAt  string `json:"submitted_at"`
+}
+
+func (w *verificationJobWire) toModel() *VerificationJob {
+	return &VerificationJob{
+		TrackingID:   w.TrackingID,
+		DocumentHash: w.DocumentHash,
+		Status:       w.Status,
+		SubmittedAt:  w.SubmittedAt,
+	}
+}
+
+type certValidationWire struct {
+	Subject          string   `json:"subject"`
+	Issuer           string   `json:"issuer"`
+	Serial           string   `json:"serial"`
+	NotBefore        string   `json:"not_before"`
+	NotAfter         string   `json:"not_after"`
+	Qualified        bool     `json:"qualified"`
+	OnEutl           bool     `json:"on_eutl"`
+	Qscd             bool     `json:"qscd"`
+	RevocationStatus string   `json:"revocation_status"`
+	RevocationTime   *string  `json:"revocation_time"`
+	KeyUsage         []string `json:"key_usage"`
+	Valid             bool     `json:"valid"`
+	ValidatedAt      string   `json:"validated_at"`
+}
+
+func (w *certValidationWire) toModel() *CertificateValidationResult {
+	return &CertificateValidationResult{
+		Subject:          w.Subject,
+		Issuer:           w.Issuer,
+		Serial:           w.Serial,
+		NotBefore:        w.NotBefore,
+		NotAfter:         w.NotAfter,
+		Qualified:        w.Qualified,
+		OnEutl:           w.OnEutl,
+		Qscd:             w.Qscd,
+		RevocationStatus: w.RevocationStatus,
+		RevocationTime:   derefStr(w.RevocationTime),
+		KeyUsage:         w.KeyUsage,
+		Valid:             w.Valid,
+		ValidatedAt:      w.ValidatedAt,
+	}
+}
+
 // ── Low-level HTTP ────────────────────────────────────────────────────────────
 
 func (c *Client) post(ctx context.Context, path string, body any, out any) error {
