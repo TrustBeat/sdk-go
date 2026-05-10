@@ -204,21 +204,6 @@ func (c *Client) Verify(proof *AnchorProof) (bool, error) {
 	return Verify(proof)
 }
 
-// Timestamp issues a dedicated (non-batched) RFC 3161 qualified timestamp for a single hash.
-// Consumes 1 credit. Returns synchronously, usually sub-second.
-func (c *Client) Timestamp(ctx context.Context, sha256Hex string, opts *AnchorOptions) (*TimestampResult, error) {
-	body := map[string]any{
-		"hash":           sha256Hex,
-		"hash_algorithm": "sha256",
-	}
-	applyOpts(body, opts)
-	var ts timestampWire
-	if err := c.post(ctx, "/timestamps", body, &ts); err != nil {
-		return nil, err
-	}
-	return ts.toModel(), nil
-}
-
 // ── AI Act Audit Anchoring ────────────────────────────────────────────────────
 
 // AnchorAiDecision submits an AI decision for EU AI Act Article 12 anchoring.
@@ -829,36 +814,3 @@ func (w *aiDecisionProofWire) toModel() *AiDecisionProof {
 	return p
 }
 
-type timestampWire struct {
-	ID            string  `json:"id"`
-	Hash          string  `json:"hash"`
-	HashAlgorithm string  `json:"hash_algorithm"`
-	Token         string  `json:"token"` // base64-encoded DER
-	TokenFormat   string  `json:"token_format"`
-	TSASerial     string  `json:"tsa_serial"`
-	Provider      string  `json:"provider"`
-	IssuedAt      string  `json:"issued_at"`
-	ClientRef     *string `json:"client_ref"`
-	Description   *string `json:"description"`
-}
-
-func (w *timestampWire) toModel() *TimestampResult {
-	token, _ := base64.StdEncoding.DecodeString(w.Token)
-	ts := &TimestampResult{
-		ID:            w.ID,
-		Hash:          w.Hash,
-		HashAlgorithm: w.HashAlgorithm,
-		Token:         token,
-		TokenFormat:   w.TokenFormat,
-		TSASerial:     w.TSASerial,
-		Provider:      w.Provider,
-		IssuedAt:      w.IssuedAt,
-	}
-	if w.ClientRef != nil {
-		ts.ClientRef = *w.ClientRef
-	}
-	if w.Description != nil {
-		ts.Description = *w.Description
-	}
-	return ts
-}

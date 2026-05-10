@@ -150,17 +150,3 @@ type CertificateValidationResult struct {
 	ValidatedAt      string // ISO 8601
 }
 
-// TimestampResult holds a dedicated (non-batched) RFC 3161 qualified timestamp.
-// One credit is consumed per call. Token is the raw DER-encoded TimeStampToken.
-type TimestampResult struct {
-	ID            string
-	Hash          string
-	HashAlgorithm string
-	Token         []byte // raw DER-encoded RFC 3161 TimeStampToken
-	TokenFormat   string
-	TSASerial     string
-	Provider      string
-	IssuedAt      string // ISO 8601
-	ClientRef     string
-	Description   string
-}
