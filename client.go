@@ -115,11 +115,11 @@ func (c *Client) Anchor(ctx context.Context, sha256Hex string, opts *AnchorOptio
 }
 
 // AnchorBatch submits up to 100 SHA-256 hashes in a single request.
-// Returns a slice of AnchorJob objects in the same order as the input.
+// Returns a *BatchSubmission grouping all items under a single SubmissionID.
 // Returns nil (no error) for an empty input slice.
-func (c *Client) AnchorBatch(ctx context.Context, hashes []string, opts *AnchorOptions) ([]*AnchorJob, error) {
+func (c *Client) AnchorBatch(ctx context.Context, hashes []string, opts *AnchorOptions) (*BatchSubmission, error) {
 	if len(hashes) == 0 {
-		return nil, nil
+		return &BatchSubmission{}, nil
 	}
 	if len(hashes) > 100 {
 		return nil, fmt.Errorf("trustbeat: AnchorBatch accepts at most 100 hashes per call")
@@ -138,7 +138,8 @@ func (c *Client) AnchorBatch(ctx context.Context, hashes []string, opts *AnchorO
 		}
 	}
 	var resp struct {
-		Accepted []anchorJobWire `json:"accepted"`
+		SubmissionID string          `json:"submission_id"`
+		Accepted     []anchorJobWire `json:"accepted"`
 	}
 	if err := c.post(ctx, "/anchors/batch", body, &resp); err != nil {
 		return nil, err
@@ -147,7 +148,73 @@ func (c *Client) AnchorBatch(ctx context.Context, hashes []string, opts *AnchorO
 	for i := range resp.Accepted {
 		jobs[i] = resp.Accepted[i].toModel()
 	}
-	return jobs, nil
+	return &BatchSubmission{SubmissionID: resp.SubmissionID, Items: jobs}, nil
+}
+
+// GetBatchStatus returns anchored/pending counts for a batch submission.
+func (c *Client) GetBatchStatus(ctx context.Context, submissionID string) (*BatchStatus, error) {
+	var resp struct {
+		SubmissionID string `json:"submission_id"`
+		Total        int    `json:"total"`
+		Anchored     int    `json:"anchored"`
+		Pending      int    `json:"pending"`
+	}
+	if err := c.get(ctx, "/anchors/batch/"+url.PathEscape(submissionID)+"/status", &resp); err != nil {
+		return nil, err
+	}
+	return &BatchStatus{
+		SubmissionID: resp.SubmissionID,
+		Total:        resp.Total,
+		Anchored:     resp.Anchored,
+		Pending:      resp.Pending,
+	}, nil
+}
+
+// GetBatchProofs returns all anchored inclusion proofs for a batch submission.
+func (c *Client) GetBatchProofs(ctx context.Context, submissionID string) ([]*AnchorProof, error) {
+	var resp struct {
+		Proofs []proofWire `json:"proofs"`
+	}
+	if err := c.get(ctx, "/anchors/batch/"+url.PathEscape(submissionID)+"/proofs", &resp); err != nil {
+		return nil, err
+	}
+	proofs := make([]*AnchorProof, len(resp.Proofs))
+	for i := range resp.Proofs {
+		proofs[i] = resp.Proofs[i].toModel()
+	}
+	return proofs, nil
+}
+
+// AnchorBatchWait polls GetBatchStatus until all items are anchored, then returns all proofs.
+// opts may be nil (defaults: 15-minute timeout, 15-second poll interval).
+func (c *Client) AnchorBatchWait(ctx context.Context, submission *BatchSubmission, opts *WaitOptions) ([]*AnchorProof, error) {
+	timeout, poll := 15*time.Minute, 15*time.Second
+	if opts != nil {
+		if opts.Timeout > 0 {
+			timeout = opts.Timeout
+		}
+		if opts.PollInterval > 0 {
+			poll = opts.PollInterval
+		}
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		status, err := c.GetBatchStatus(ctx, submission.SubmissionID)
+		if err != nil {
+			return nil, err
+		}
+		if status.Pending == 0 && status.Total > 0 {
+			return c.GetBatchProofs(ctx, submission.SubmissionID)
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("trustbeat: AnchorBatchWait timed out after %v for %s", timeout, submission.SubmissionID)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(poll):
+		}
+	}
 }
 
 // GetProof retrieves the inclusion proof for a previously submitted hash.

@@ -39,6 +39,21 @@ type AnchorProof struct {
 	Description   string // empty if not set
 }
 
+// BatchSubmission is returned by AnchorBatch. The SubmissionID groups all items
+// so their status and proofs can be retrieved together.
+type BatchSubmission struct {
+	SubmissionID string
+	Items        []*AnchorJob
+}
+
+// BatchStatus is returned by GetBatchStatus.
+type BatchStatus struct {
+	SubmissionID string
+	Total        int
+	Anchored     int
+	Pending      int
+}
+
 // ── AI Act Audit models ───────────────────────────────────────────────────────
 
 // AiTimeEnvelope holds the start and end times of a single AI inference call.
