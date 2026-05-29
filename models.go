@@ -165,3 +165,43 @@ type CertificateValidationResult struct {
 	ValidatedAt      string // ISO 8601
 }
 
+// ── Audit Trail ───────────────────────────────────────────────────────────────
+
+// AuditProofStep is one step in an audit event Merkle inclusion proof.
+type AuditProofStep struct {
+	Sibling string // hex-encoded SHA-256 hash of the sibling node
+	Side    string // "left" or "right"
+}
+
+// AuditEvent is a single audit event as returned by ListAuditEvents.
+type AuditEvent struct {
+	EventID       string
+	TrailCategory string
+	Actor         string
+	Action        string
+	Ts            string // ISO 8601 — when the event occurred
+	ReceivedAt    string // ISO 8601 — when TrustBeat received it
+	Anchored      bool
+	System        string
+	Resource      string
+}
+
+// AuditEventProof is the full Merkle inclusion proof for an anchored audit event.
+type AuditEventProof struct {
+	EventID       string
+	CanonicalHash string
+	BatchID       string
+	LeafIndex     int
+	MerklePath    []AuditProofStep
+	AnchoredAt    string // ISO 8601
+}
+
+// AuditExportJob is returned immediately (202) when ExportAuditEvents is called.
+// Poll until Status is "ready" or "failed".
+type AuditExportJob struct {
+	JobID      string
+	Status     string // "pending" | "processing" | "ready" | "failed"
+	EventCount int
+	Error      string
+}
+

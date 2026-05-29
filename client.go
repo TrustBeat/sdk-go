@@ -602,6 +602,153 @@ func (w *certValidationWire) toModel() *CertificateValidationResult {
 	}
 }
 
+// ── Audit Trail ───────────────────────────────────────────────────────────────
+
+type auditEventWire struct {
+	EventID       string  `json:"event_id"`
+	TrailCategory string  `json:"trail_category"`
+	Actor         string  `json:"actor"`
+	Action        string  `json:"action"`
+	Ts            string  `json:"ts"`
+	ReceivedAt    string  `json:"received_at"`
+	Anchored      bool    `json:"anchored"`
+	System        *string `json:"system"`
+	Resource      *string `json:"resource"`
+}
+
+func (w *auditEventWire) toModel() AuditEvent {
+	return AuditEvent{
+		EventID: w.EventID, TrailCategory: w.TrailCategory, Actor: w.Actor,
+		Action: w.Action, Ts: w.Ts, ReceivedAt: w.ReceivedAt, Anchored: w.Anchored,
+		System: derefStr(w.System), Resource: derefStr(w.Resource),
+	}
+}
+
+type auditProofStepWire struct {
+	Sibling string `json:"sibling"`
+	Side    string `json:"side"`
+}
+
+type auditEventProofWire struct {
+	EventID       string               `json:"event_id"`
+	CanonicalHash string               `json:"canonical_hash"`
+	BatchID       string               `json:"batch_id"`
+	LeafIndex     int                  `json:"leaf_index"`
+	MerklePath    []auditProofStepWire `json:"merkle_path"`
+	AnchoredAt    string               `json:"anchored_at"`
+	Status        string               `json:"status"` // "pending" when not yet anchored
+}
+
+func (w *auditEventProofWire) toModel() *AuditEventProof {
+	path := make([]AuditProofStep, len(w.MerklePath))
+	for i, s := range w.MerklePath {
+		path[i] = AuditProofStep{Sibling: s.Sibling, Side: s.Side}
+	}
+	return &AuditEventProof{
+		EventID: w.EventID, CanonicalHash: w.CanonicalHash, BatchID: w.BatchID,
+		LeafIndex: w.LeafIndex, MerklePath: path, AnchoredAt: w.AnchoredAt,
+	}
+}
+
+type auditExportJobWire struct {
+	JobID      string `json:"job_id"`
+	Status     string `json:"status"`
+	EventCount int    `json:"event_count"`
+	Error      string `json:"error"`
+}
+
+// SubmitAuditEvent submits a single audit event for tamper-evident Merkle anchoring.
+// Returns the eventID immediately (202 Accepted).
+func (c *Client) SubmitAuditEvent(ctx context.Context, trailCategory, actor, action, ts string, opts map[string]any) (string, error) {
+	body := map[string]any{
+		"trail_category": trailCategory,
+		"actor":          actor,
+		"action":         action,
+		"ts":             ts,
+	}
+	for k, v := range opts {
+		body[k] = v
+	}
+	var out struct {
+		EventID string `json:"event_id"`
+	}
+	if err := c.post(ctx, "/audit/events", body, &out); err != nil {
+		return "", err
+	}
+	return out.EventID, nil
+}
+
+// GetAuditEventProof fetches the Merkle inclusion proof for an anchored audit event.
+// Returns nil, nil if the event is not yet anchored (still pending the next batch cycle).
+func (c *Client) GetAuditEventProof(ctx context.Context, eventID string) (*AuditEventProof, error) {
+	var w auditEventProofWire
+	if err := c.get(ctx, "/audit/events/"+eventID+"/proof", &w); err != nil {
+		return nil, err
+	}
+	if w.Status == "pending" {
+		return nil, nil
+	}
+	return w.toModel(), nil
+}
+
+// ListAuditEvents queries audit events with optional URL query parameters.
+// Pass nil or empty params map to list all events on page 1.
+func (c *Client) ListAuditEvents(ctx context.Context, params url.Values) ([]AuditEvent, error) {
+	path := "/audit/events"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+	var out struct {
+		Events []auditEventWire `json:"events"`
+	}
+	if err := c.get(ctx, path, &out); err != nil {
+		return nil, err
+	}
+	events := make([]AuditEvent, len(out.Events))
+	for i := range out.Events {
+		events[i] = out.Events[i].toModel()
+	}
+	return events, nil
+}
+
+// ExportAuditEvents exports audit events as a court-admissible ZIP package and
+// returns the raw ZIP bytes. Blocks until the export job completes.
+//
+// opts may contain "trail_category", "from", and/or "to" (ISO 8601 strings).
+func (c *Client) ExportAuditEvents(ctx context.Context, opts map[string]string) ([]byte, error) {
+	body := make(map[string]any, len(opts))
+	for k, v := range opts {
+		body[k] = v
+	}
+	var jobResp struct {
+		JobID string `json:"job_id"`
+	}
+	if err := c.post(ctx, "/audit/export", body, &jobResp); err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(5 * time.Minute)
+	for {
+		raw, ct, err := c.getRaw(ctx, "/audit/export/"+jobResp.JobID)
+		if err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(ct, "application/zip") {
+			return raw, nil
+		}
+		var status auditExportJobWire
+		if err := json.Unmarshal(raw, &status); err != nil {
+			return nil, fmt.Errorf("trustbeat: parse export status: %w", err)
+		}
+		if status.Status == "failed" {
+			return nil, errors.New("trustbeat: export failed: " + status.Error)
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("trustbeat: export job %s timed out", jobResp.JobID)
+		}
+		time.Sleep(3 * time.Second)
+	}
+}
+
 // ── Low-level HTTP ────────────────────────────────────────────────────────────
 
 func (c *Client) post(ctx context.Context, path string, body any, out any) error {
@@ -610,6 +757,29 @@ func (c *Client) post(ctx context.Context, path string, body any, out any) error
 
 func (c *Client) get(ctx context.Context, path string, out any) error {
 	return c.do(ctx, http.MethodGet, path, nil, out)
+}
+
+// getRaw returns the raw response bytes and content-type header.
+func (c *Client) getRaw(ctx context.Context, path string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("trustbeat: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("User-Agent", "trustbeat-go/"+sdkVersion)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("trustbeat: request: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("trustbeat: read body: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", mapHTTPError(resp.StatusCode, raw)
+	}
+	return raw, resp.Header.Get("Content-Type"), nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
