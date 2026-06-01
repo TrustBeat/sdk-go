@@ -148,34 +148,40 @@ func TestAnchorOptsForwarded(t *testing.T) {
 
 // ── AnchorBatch ───────────────────────────────────────────────────────────────
 
-func TestAnchorBatchReturnsJobs(t *testing.T) {
+func TestAnchorBatchReturnsBatchSubmission(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/anchors/batch" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		resp := `{"accepted":[` + anchorAcceptedJSON("t1") + "," + anchorAcceptedJSON("t2") + `]}`
+		resp := `{"submission_id":"sub-abc","accepted":[` + anchorAcceptedJSON("t1") + "," + anchorAcceptedJSON("t2") + `],"total":2}`
 		writeJSON(w, 202, resp)
 	}))
 	defer srv.Close()
 
-	jobs, err := newClient(t, srv).AnchorBatch(context.Background(),
+	result, err := newClient(t, srv).AnchorBatch(context.Background(),
 		[]string{strings.Repeat("a", 64), strings.Repeat("b", 64)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs) != 2 {
-		t.Fatalf("got %d jobs; want 2", len(jobs))
+	if result.SubmissionID != "sub-abc" {
+		t.Errorf("SubmissionID = %q; want sub-abc", result.SubmissionID)
 	}
-	if jobs[0].ID != "t1" || jobs[1].ID != "t2" {
-		t.Errorf("IDs = %s, %s; want t1, t2", jobs[0].ID, jobs[1].ID)
+	if len(result.Items) != 2 {
+		t.Fatalf("got %d items; want 2", len(result.Items))
+	}
+	if result.Items[0].ID != "t1" || result.Items[1].ID != "t2" {
+		t.Errorf("IDs = %s, %s; want t1, t2", result.Items[0].ID, result.Items[1].ID)
 	}
 }
 
-func TestAnchorBatchEmptyReturnsNil(t *testing.T) {
+func TestAnchorBatchEmptyReturnsEmptySubmission(t *testing.T) {
 	c, _ := trustbeat.NewClient("tb_live_test")
-	jobs, err := c.AnchorBatch(context.Background(), nil, nil)
-	if err != nil || jobs != nil {
-		t.Errorf("expected nil, nil; got %v, %v", jobs, err)
+	result, err := c.AnchorBatch(context.Background(), nil, nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("expected empty items; got %d", len(result.Items))
 	}
 }
 
