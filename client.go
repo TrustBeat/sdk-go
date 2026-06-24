@@ -103,12 +103,12 @@ type WaitOptions struct {
 func (c *Client) Anchor(ctx context.Context, sha256Hex string, opts *AnchorOptions) (*AnchorJob, error) {
 	body := map[string]any{
 		"hash":           sha256Hex,
-		"hash_algorithm": "sha256",
+		"hash_algorithm": "SHA-256",
 	}
 	applyOpts(body, opts)
 
 	var job anchorJobWire
-	if err := c.post(ctx, "/anchors", body, &job); err != nil {
+	if err := c.post(ctx, "/anchor", body, &job); err != nil {
 		return nil, err
 	}
 	return job.toModel(), nil
@@ -126,7 +126,7 @@ func (c *Client) AnchorBatch(ctx context.Context, hashes []string, opts *AnchorO
 	}
 	items := make([]map[string]any, len(hashes))
 	for i, h := range hashes {
-		items[i] = map[string]any{"hash": h, "hash_algorithm": "sha256"}
+		items[i] = map[string]any{"hash": h, "hash_algorithm": "SHA-256"}
 	}
 	body := map[string]any{"hashes": items}
 	if opts != nil {
@@ -141,7 +141,7 @@ func (c *Client) AnchorBatch(ctx context.Context, hashes []string, opts *AnchorO
 		SubmissionID string          `json:"submission_id"`
 		Accepted     []anchorJobWire `json:"accepted"`
 	}
-	if err := c.post(ctx, "/anchors/batch", body, &resp); err != nil {
+	if err := c.post(ctx, "/anchor/batch", body, &resp); err != nil {
 		return nil, err
 	}
 	jobs := make([]*AnchorJob, len(resp.Accepted))
@@ -159,7 +159,7 @@ func (c *Client) GetBatchStatus(ctx context.Context, submissionID string) (*Batc
 		Anchored     int    `json:"anchored"`
 		Pending      int    `json:"pending"`
 	}
-	if err := c.get(ctx, "/anchors/batch/"+url.PathEscape(submissionID)+"/status", &resp); err != nil {
+	if err := c.get(ctx, "/anchor/batch/"+url.PathEscape(submissionID)+"/status", &resp); err != nil {
 		return nil, err
 	}
 	return &BatchStatus{
@@ -175,7 +175,7 @@ func (c *Client) GetBatchProofs(ctx context.Context, submissionID string) ([]*An
 	var resp struct {
 		Proofs []proofWire `json:"proofs"`
 	}
-	if err := c.get(ctx, "/anchors/batch/"+url.PathEscape(submissionID)+"/proofs", &resp); err != nil {
+	if err := c.get(ctx, "/anchor/batch/"+url.PathEscape(submissionID)+"/proofs", &resp); err != nil {
 		return nil, err
 	}
 	proofs := make([]*AnchorProof, len(resp.Proofs))
@@ -221,7 +221,7 @@ func (c *Client) AnchorBatchWait(ctx context.Context, submission *BatchSubmissio
 // Returns (nil, nil) if the hash is still pending (not yet included in a batch).
 // Returns (*NotFoundError, ...) if the tracking ID is unknown.
 func (c *Client) GetProof(ctx context.Context, trackingID string) (*AnchorProof, error) {
-	path := "/anchors/" + url.PathEscape(trackingID)
+	path := "/anchor/" + url.PathEscape(trackingID) + "/proof"
 	var p proofWire
 	if err := c.get(ctx, path, &p); err != nil {
 		return nil, err

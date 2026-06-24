@@ -71,7 +71,7 @@ func TestNewClientEmptyKeyReturnsError(t *testing.T) {
 
 func TestAnchorReturnsJob(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/anchors" {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/anchor" {
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
 		writeJSON(w, 202, anchorAcceptedJSON("track-1"))
@@ -121,8 +121,8 @@ func TestAnchorSendsHashInBody(t *testing.T) {
 	if body["hash"] != hash {
 		t.Errorf("body hash = %v; want %s", body["hash"], hash)
 	}
-	if body["hash_algorithm"] != "sha256" {
-		t.Errorf("hash_algorithm = %v; want sha256", body["hash_algorithm"])
+	if body["hash_algorithm"] != "SHA-256" {
+		t.Errorf("hash_algorithm = %v; want SHA-256", body["hash_algorithm"])
 	}
 }
 
@@ -150,7 +150,7 @@ func TestAnchorOptsForwarded(t *testing.T) {
 
 func TestAnchorBatchReturnsBatchSubmission(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/anchors/batch" {
+		if r.URL.Path != "/v1/anchor/batch" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		resp := `{"submission_id":"sub-abc","accepted":[` + anchorAcceptedJSON("t1") + "," + anchorAcceptedJSON("t2") + `],"total":2}`
