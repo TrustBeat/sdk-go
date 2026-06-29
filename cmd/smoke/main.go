@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,21 @@ import (
 
 	tb "trustbeat.eu/trustbeat"
 )
+
+// aiMeta is the fixed AI-decision metadata — only the hashes vary per run.
+func aiMeta() *tb.AiDecisionMetadata {
+	return &tb.AiDecisionMetadata{
+		ModelID:        "claude-opus-4-8",
+		SystemName:     "trustbeat-sdk-smoke",
+		RiskCategory:   "employment",
+		DecisionType:   "classification",
+		HumanOversight: true,
+		TimeEnvelope: tb.AiTimeEnvelope{
+			StartedAt:   "2026-06-29T10:00:00Z",
+			CompletedAt: "2026-06-29T10:00:01Z",
+		},
+	}
+}
 
 func batchHashes() []string {
 	seed := os.Getenv("TB_BATCH_SEED")
@@ -58,7 +74,7 @@ func main() {
 	if len(os.Args) < 2 {
 		fail("usage: smoke {submit|verify <id>}")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	switch os.Args[1] {
@@ -155,6 +171,155 @@ func main() {
 			}
 		}
 		fmt.Printf("OK batch sid=%s n=%d\n", sid, len(proofs))
+
+	case "submit-ai":
+		job, err := client().AnchorAiDecision(ctx, os.Getenv("TB_AI_INPUT"), os.Getenv("TB_AI_OUTPUT"), aiMeta(), nil)
+		if err != nil {
+			fail("submit-ai: %v", err)
+		}
+		if job.ID == "" {
+			fail("submit-ai: empty tracking id")
+		}
+		fmt.Println(job.ID)
+
+	case "verify-ai":
+		if len(os.Args) < 3 {
+			fail("usage: smoke verify-ai <id>")
+		}
+		id := os.Args[2]
+		inHash, outHash := os.Getenv("TB_AI_INPUT"), os.Getenv("TB_AI_OUTPUT")
+		c := client()
+		proof, err := c.GetAiDecisionProof(ctx, id)
+		if err != nil {
+			fail("verify-ai: %v", err)
+		}
+		if proof == nil {
+			fail("verify-ai: proof for %s not ready", id)
+		}
+		if !strings.EqualFold(proof.InputHash, inHash) {
+			fail("verify-ai: input_hash echo mismatch %s != %s", proof.InputHash, inHash)
+		}
+		if !strings.EqualFold(proof.OutputHash, outHash) {
+			fail("verify-ai: output_hash echo mismatch %s != %s", proof.OutputHash, outHash)
+		}
+		if proof.VerificationStatus != "VERIFIED" {
+			fail("verify-ai: status %s != VERIFIED", proof.VerificationStatus)
+		}
+		if proof.Proof == nil {
+			fail("verify-ai: missing Merkle proof")
+		}
+		ok, err := c.Verify(proof.Proof)
+		if err != nil {
+			fail("verify-ai: %v", err)
+		}
+		if !ok {
+			fail("verify-ai: local Merkle verification failed")
+		}
+		fmt.Printf("OK ai id=%s combined=%.16s…\n", id, proof.CombinedHash)
+
+	case "submit-file":
+		job, err := client().AnchorFile(ctx, os.Getenv("TB_FILE_PATH"), nil)
+		if err != nil {
+			fail("submit-file: %v", err)
+		}
+		if job.ID == "" {
+			fail("submit-file: empty tracking id")
+		}
+		fmt.Println(job.ID)
+
+	case "submit-audit":
+		eventID, err := client().SubmitAuditEvent(ctx,
+			os.Getenv("TB_AUDIT_CATEGORY"), os.Getenv("TB_AUDIT_ACTOR"),
+			os.Getenv("TB_AUDIT_ACTION"), os.Getenv("TB_AUDIT_TS"), nil)
+		if err != nil {
+			fail("submit-audit: %v", err)
+		}
+		if eventID == "" {
+			fail("submit-audit: empty event_id")
+		}
+		fmt.Println(eventID)
+
+	case "verify-audit":
+		if len(os.Args) < 3 {
+			fail("usage: smoke verify-audit <id>")
+		}
+		id := os.Args[2]
+		c := client()
+		proof, err := c.GetAuditEventProof(ctx, id)
+		if err != nil {
+			fail("verify-audit: %v", err)
+		}
+		if proof == nil {
+			fail("verify-audit: proof for %s not ready", id)
+		}
+		if proof.EventID != id {
+			fail("verify-audit: event_id echo mismatch %s != %s", proof.EventID, id)
+		}
+		if proof.CanonicalHash == "" {
+			fail("verify-audit: empty canonical_hash")
+		}
+		if proof.BatchID == "" {
+			fail("verify-audit: empty batch_id")
+		}
+		if proof.LeafIndex < 0 {
+			fail("verify-audit: invalid leaf_index")
+		}
+		events, err := c.ListAuditEvents(ctx, url.Values{"trail_category": {os.Getenv("TB_AUDIT_CATEGORY")}})
+		if err != nil {
+			fail("verify-audit: %v", err)
+		}
+		found := false
+		for _, e := range events {
+			if e.EventID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			fail("verify-audit: %s not returned by ListAuditEvents", id)
+		}
+		fmt.Printf("OK audit id=%s batch=%.12s… leaf=%d\n", id, proof.BatchID, proof.LeafIndex)
+
+	case "verify-sig":
+		doc, err := os.ReadFile(os.Getenv("TB_SIG_DOC"))
+		if err != nil {
+			fail("verify-sig: %v", err)
+		}
+		expected := os.Getenv("TB_SIG_DOCHASH")
+		report, err := client().VerifySignature(ctx, doc, os.Getenv("TB_SIG_FORMAT"))
+		if err != nil {
+			fail("verify-sig: %v", err)
+		}
+		if !strings.EqualFold(report.DocumentHash, expected) {
+			fail("verify-sig: document_hash mismatch %s != %s", report.DocumentHash, expected)
+		}
+		if report.Verdict == "" {
+			fail("verify-sig: empty verdict")
+		}
+		if len(report.Signatures) == 0 {
+			fail("verify-sig: report has no signatures")
+		}
+		fmt.Printf("OK sig verdict=%s signatures=%d\n", report.Verdict, len(report.Signatures))
+
+	case "validate-cert":
+		cert, err := os.ReadFile(os.Getenv("TB_CERT_PATH"))
+		if err != nil {
+			fail("validate-cert: %v", err)
+		}
+		res, err := client().ValidateCertificate(ctx, cert)
+		if err != nil {
+			fail("validate-cert: %v", err)
+		}
+		if res.Subject == "" {
+			fail("validate-cert: empty subject")
+		}
+		if res.Issuer == "" {
+			fail("validate-cert: empty issuer")
+		}
+		if res.ValidatedAt == "" {
+			fail("validate-cert: empty validated_at")
+		}
+		fmt.Printf("OK cert subject=%.24s… qualified=%t\n", res.Subject, res.Qualified)
 
 	default:
 		fail("unknown command: %s", os.Args[1])
