@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"trustbeat.eu/trustbeat"
+	"github.com/TrustBeat/sdk-go"
 )
 
 // ── Test helpers ──────────────────────────────────────────────────────────────

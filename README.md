@@ -5,7 +5,7 @@ Qualified electronic timestamps and Merkle anchoring — eIDAS-compliant, over a
 ## Install
 
 ```bash
-go get trustbeat.eu/trustbeat
+go get github.com/TrustBeat/sdk-go
 ```
 
 ## Quickstart
@@ -18,7 +18,7 @@ import (
     "fmt"
     "log"
 
-    "trustbeat.eu/trustbeat"
+    trustbeat "github.com/TrustBeat/sdk-go"
 )
 
 func main() {

@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	tb "trustbeat.eu/trustbeat"
+	tb "github.com/TrustBeat/sdk-go"
 )
 
 // aiMeta is the fixed AI-decision metadata — only the hashes vary per run.
