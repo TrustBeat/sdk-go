@@ -29,8 +29,9 @@ func main() {
 
     ctx := context.Background()
 
-    // Anchor a file (SHA-256 computed locally, file never leaves your machine)
-    proof, err := client.AnchorFile(ctx, "contract.pdf", nil)
+    // Anchor a file (SHA-256 computed locally, file never leaves your machine).
+    // AnchorFileWait blocks until the proof is ready (next batch, up to 11 min).
+    proof, err := client.AnchorFileWait(ctx, "contract.pdf", nil, nil)
     if err != nil {
         log.Fatal(err)
     }
@@ -41,8 +42,8 @@ func main() {
     // Verify locally — no network call
     valid, err := client.Verify(proof)
 
-    // Anchor a raw SHA-256 hash
-    job, err := client.Anchor(ctx, "e3b0c44298fc1c149afb4c8996fb92427ae41e4649b934ca495991b7852b855", nil)
+    // Or anchor a raw SHA-256 hash without blocking, then wait for the proof.
+    job, err := client.Anchor(ctx, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", nil)
     proof, err = client.AnchorWait(ctx, job.ID, nil)  // polls up to 11 min
 
     _ = valid
