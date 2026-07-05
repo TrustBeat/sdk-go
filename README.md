@@ -52,6 +52,32 @@ func main() {
 }
 ```
 
+## Tamper-Evident Logs (NIS2)
+
+Anchor a log hash together with canonical metadata for NIS2 Article 21 audit trails.
+The server seals the metadata into the Merkle leaf, so the proof covers both the log
+content and its context.
+
+```go
+c, _ := trustbeat.NewClient("tb_live_...")
+ctx := context.Background()
+
+// Hash the log yourself — content never leaves your machine.
+logHash, _ := trustbeat.HashFile("app.log")
+
+meta := &trustbeat.LogMetadata{
+    LogSource:      trustbeat.LogSource{URI: "/var/log/app.log", Name: "Application log"},
+    SourceIdentity: trustbeat.LogSourceIdentity{Hostname: "web-01", ServiceName: "payments"},
+    TimeEnvelope:   &trustbeat.LogTimeEnvelope{StartAt: "2026-04-15T00:00:00Z", EndAt: "2026-04-15T23:59:59Z"},
+}
+job, _ := c.AnchorLog(ctx, logHash, meta, "incident-2026-05")
+fmt.Println(job.ID, job.CombinedHash)
+
+// Wait for the qualified anchor (next batch, up to ~11 min).
+proof, _ := c.AnchorLogWait(ctx, job.ID, nil)
+fmt.Println(proof.VerificationStatus) // "VERIFIED"
+```
+
 ## Requirements
 
 - Go 1.21+

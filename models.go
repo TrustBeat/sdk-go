@@ -205,3 +205,81 @@ type AuditExportJob struct {
 	Error      string
 }
 
+
+// ── Tamper-Evident Logs (NIS2) ─────────────────────────────────────────────────
+
+// LogSource identifies the log source being anchored. URI is required.
+type LogSource struct {
+	URI       string // file path, S3 URI, syslog identifier, etc.
+	Name      string // optional — human-readable name
+	SizeBytes int64  // optional — size in bytes (0 = omit)
+}
+
+// LogTimeEnvelope is the time window covered by the anchored log.
+type LogTimeEnvelope struct {
+	StartAt string // ISO 8601
+	EndAt   string // ISO 8601
+}
+
+// LogSourceIdentity identifies the system that emitted the log (all fields optional).
+type LogSourceIdentity struct {
+	SystemUUID      string
+	CloudInstanceID string
+	Hostname        string
+	ServiceName     string
+	TenantID        string
+}
+
+// LogMetadata is sealed alongside a log hash for NIS2 Article 21 anchoring. The
+// server computes combined_hash = SHA-256(log_hash_bytes ‖ UTF-8(JCS(metadata))).
+// LogSource.URI and SourceIdentity are required; TimeEnvelope is optional (nil).
+type LogMetadata struct {
+	LogSource      LogSource
+	SourceIdentity LogSourceIdentity
+	TimeEnvelope   *LogTimeEnvelope
+}
+
+// LogAnchorJob is returned immediately (202) when a log hash is enqueued.
+type LogAnchorJob struct {
+	ID           string
+	LogHash      string
+	CombinedHash string
+	Status       string // "pending"
+	SubmittedAt  string // ISO 8601
+	Overage      bool
+	Label        string
+}
+
+// LogStatus is the lightweight status of a log anchor submission.
+type LogStatus struct {
+	ID          string
+	Status      string // "pending" | "anchored"
+	SubmittedAt string
+	AnchoredAt  string // empty until anchored
+}
+
+// LogAnchorListItem is a single log anchor submission from ListLogs.
+type LogAnchorListItem struct {
+	ID           string
+	LogHash      string
+	Status       string
+	SubmittedAt  string
+	LogSourceURI string
+	AnchoredAt   string
+	ServiceName  string
+	Label        string
+}
+
+// LogProof is the verification result for an anchored log. VerificationStatus is
+// "VERIFIED" when the Merkle proof is valid and the combined hash matches.
+type LogProof struct {
+	ID                 string
+	LogHash            string
+	Metadata           LogMetadata
+	CombinedHash       string
+	VerificationStatus string // "VERIFIED" | "FAILED"
+	ArchiveStampsCount int
+	AnchoredAt         string
+	Proof              *AnchorProof
+	FailureReasons     []string
+}

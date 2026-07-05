@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -554,5 +555,155 @@ func TestExportAuditEventsRequiresFromTo(t *testing.T) {
 	}
 	if called {
 		t.Error("no HTTP request should be sent when from/to are missing")
+	}
+}
+
+// ── Tamper-Evident Logs (NIS2) ──────────────────────────────────────────────
+
+func logProofJSON(status string) string {
+	proof := "null"
+	if status == "VERIFIED" {
+		proof = proofJSON("log-1")
+	}
+	anchored := `"2026-04-15T10:10:00Z"`
+	if status == "PENDING" {
+		anchored = "null"
+	}
+	return fmt.Sprintf(`{"id":"log-1","log_hash":"%s","combined_hash":"%s","metadata":{"log_source":{"uri":"/var/log/app.log","name":"App","size_bytes":2048},"source_identity":{"hostname":"host-1","service_name":"payments"},"time_envelope":{"start_at":"2026-04-15T00:00:00Z","end_at":"2026-04-15T23:59:59Z"}},"verification_status":"%s","archive_stamps_count":0,"anchored_at":%s,"proof":%s}`,
+		strings.Repeat("a", 64), strings.Repeat("c", 64), status, anchored, proof)
+}
+
+func TestAnchorLogSendsBody(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		writeJSON(w, 202, fmt.Sprintf(`{"id":"log-1","log_hash":"%s","combined_hash":"%s","status":"pending","submitted_at":"2026-04-15T10:00:00Z","overage":false,"label":"lbl"}`,
+			strings.Repeat("b", 64), strings.Repeat("c", 64)))
+	}))
+	defer srv.Close()
+
+	meta := &trustbeat.LogMetadata{
+		LogSource:      trustbeat.LogSource{URI: "/var/log/app.log", Name: "App", SizeBytes: 2048},
+		SourceIdentity: trustbeat.LogSourceIdentity{Hostname: "host-1", ServiceName: "payments"},
+		TimeEnvelope:   &trustbeat.LogTimeEnvelope{StartAt: "2026-04-15T00:00:00Z", EndAt: "2026-04-15T23:59:59Z"},
+	}
+	job, err := newClient(t, srv).AnchorLog(context.Background(), strings.Repeat("b", 64), meta, "lbl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.ID != "log-1" || job.Label != "lbl" {
+		t.Errorf("job = %+v", job)
+	}
+	if body["log_hash"] != strings.Repeat("b", 64) {
+		t.Errorf("log_hash = %v", body["log_hash"])
+	}
+	md := body["metadata"].(map[string]any)
+	if md["log_source"].(map[string]any)["uri"] != "/var/log/app.log" {
+		t.Errorf("uri = %v", md["log_source"])
+	}
+	if md["source_identity"].(map[string]any)["service_name"] != "payments" {
+		t.Errorf("service_name = %v", md["source_identity"])
+	}
+	if md["time_envelope"].(map[string]any)["end_at"] != "2026-04-15T23:59:59Z" {
+		t.Errorf("time_envelope = %v", md["time_envelope"])
+	}
+}
+
+func TestGetLogProofVerified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, logProofJSON("VERIFIED"))
+	}))
+	defer srv.Close()
+	proof, err := newClient(t, srv).GetLogProof(context.Background(), "log-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof == nil || proof.VerificationStatus != "VERIFIED" {
+		t.Fatalf("proof = %+v", proof)
+	}
+	if proof.Metadata.LogSource.URI != "/var/log/app.log" {
+		t.Errorf("metadata uri = %q", proof.Metadata.LogSource.URI)
+	}
+	if proof.Proof == nil {
+		t.Error("expected non-nil Merkle proof")
+	}
+}
+
+func TestGetLogProofPendingReturnsNil(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, logProofJSON("PENDING"))
+	}))
+	defer srv.Close()
+	proof, err := newClient(t, srv).GetLogProof(context.Background(), "log-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof != nil {
+		t.Error("expected nil while PENDING")
+	}
+}
+
+func TestGetLogStatusAndList(t *testing.T) {
+	srvS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, `{"id":"log-1","status":"anchored","submitted_at":"2026-04-15T10:00:00Z","anchored_at":"2026-04-15T10:10:00Z"}`)
+	}))
+	defer srvS.Close()
+	st, err := newClient(t, srvS).GetLogStatus(context.Background(), "log-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Status != "anchored" || st.AnchoredAt != "2026-04-15T10:10:00Z" {
+		t.Errorf("status = %+v", st)
+	}
+
+	srvL := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("status") != "anchored" {
+			t.Errorf("missing status filter: %s", r.URL.RawQuery)
+		}
+		writeJSON(w, 200, fmt.Sprintf(`{"logs":[{"id":"log-1","log_hash":"%s","status":"anchored","submitted_at":"2026-04-15T10:00:00Z","log_source_uri":"/var/log/app.log","service_name":"payments","label":"x"}],"total":1}`, strings.Repeat("a", 64)))
+	}))
+	defer srvL.Close()
+	logs, err := newClient(t, srvL).ListLogs(context.Background(), url.Values{"status": {"anchored"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].LogSourceURI != "/var/log/app.log" {
+		t.Errorf("logs = %+v", logs)
+	}
+}
+
+func TestExportLogReturnsBytes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, `{"bundle_type":"trustbeat.log.proof","id":"log-1"}`)
+	}))
+	defer srv.Close()
+	blob, err := newClient(t, srv).ExportLog(context.Background(), "log-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(blob), "trustbeat.log.proof") {
+		t.Errorf("bundle = %s", blob)
+	}
+}
+
+func TestSubmitAuditEventsSendsBareArray(t *testing.T) {
+	var body []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		writeJSON(w, 202, `{"event_ids":["e1","e2"]}`)
+	}))
+	defer srv.Close()
+	ids, err := newClient(t, srv).SubmitAuditEvents(context.Background(), []map[string]any{
+		{"trail_category": "financial", "actor": "svc:pay", "action": "payment.approved", "ts": "2026-04-15T10:00:00Z"},
+		{"trail_category": "financial", "actor": "svc:pay", "action": "payment.settled", "ts": "2026-04-15T10:00:05Z"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 2 || body[0]["action"] != "payment.approved" {
+		t.Errorf("body = %+v", body)
+	}
+	if len(ids) != 2 || ids[0] != "e1" {
+		t.Errorf("ids = %v", ids)
 	}
 }
