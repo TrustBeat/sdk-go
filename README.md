@@ -2,6 +2,8 @@
 
 Qualified electronic timestamps and Merkle anchoring — eIDAS-compliant, over a simple API.
 
+Part of **[TrustBeat](https://trustbeat.eu)** — digital trust infrastructure for the EU.
+
 ## Install
 
 ```bash

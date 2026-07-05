@@ -519,3 +519,40 @@ func TestHTTP500ReturnsTrustBeatErrorWithStatus(t *testing.T) {
 		t.Errorf("Status = %d; want 500", tbe.Status)
 	}
 }
+
+// ── GetAiDecisionProof (pending) ────────────────────────────────────────────
+
+func TestGetAiDecisionProofPendingReturnsNil(t *testing.T) {
+	// Before anchoring the API returns 200 with verification_status "PENDING".
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, `{"id":"ai-1","input_hash":"","output_hash":"","combined_hash":"","metadata":{},"verification_status":"PENDING","anchored_at":null,"proof":null}`)
+	}))
+	defer srv.Close()
+
+	proof, err := newClient(t, srv).GetAiDecisionProof(context.Background(), "ai-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof != nil {
+		t.Error("expected nil proof while verification_status is PENDING")
+	}
+}
+
+// ── ExportAuditEvents (from/to required) ────────────────────────────────────
+
+func TestExportAuditEventsRequiresFromTo(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		writeJSON(w, 202, `{"job_id":"job-1","status":"pending"}`)
+	}))
+	defer srv.Close()
+
+	_, err := newClient(t, srv).ExportAuditEvents(context.Background(), map[string]string{"trail_category": "financial"})
+	if err == nil {
+		t.Fatal("expected error when from/to missing")
+	}
+	if called {
+		t.Error("no HTTP request should be sent when from/to are missing")
+	}
+}

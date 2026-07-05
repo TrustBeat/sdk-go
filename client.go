@@ -31,7 +31,7 @@ import (
 
 const (
 	defaultBaseURL = "https://api.trustbeat.eu/v1"
-	sdkVersion     = "0.1.0"
+	sdkVersion     = "0.1.1"
 )
 
 // Client is the TrustBeat API client. Create with NewClient.
@@ -340,6 +340,11 @@ func (c *Client) GetAiDecisionProof(ctx context.Context, trackingID string) (*Ai
 			return nil, nil
 		}
 		return nil, err
+	}
+	// Before anchoring the API returns 200 with verification_status "PENDING"
+	// and no proof — treat that as "not ready yet" so pollers keep waiting.
+	if p.VerificationStatus == "PENDING" {
+		return nil, nil
 	}
 	return p.toModel(), nil
 }
@@ -714,8 +719,12 @@ func (c *Client) ListAuditEvents(ctx context.Context, params url.Values) ([]Audi
 // ExportAuditEvents exports audit events as a court-admissible ZIP package and
 // returns the raw ZIP bytes. Blocks until the export job completes.
 //
-// opts may contain "trail_category", "from", and/or "to" (ISO 8601 strings).
+// opts must contain "from" and "to" (ISO 8601 strings, required by the API) and
+// may contain "trail_category".
 func (c *Client) ExportAuditEvents(ctx context.Context, opts map[string]string) ([]byte, error) {
+	if opts["from"] == "" || opts["to"] == "" {
+		return nil, errors.New("trustbeat: ExportAuditEvents requires \"from\" and \"to\" in opts")
+	}
 	body := make(map[string]any, len(opts))
 	for k, v := range opts {
 		body[k] = v
