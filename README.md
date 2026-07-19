@@ -3,6 +3,7 @@
 Qualified electronic timestamps and Merkle anchoring — eIDAS-compliant, over a simple API.
 
 Part of **[TrustBeat](https://trustbeat.eu)** — digital trust infrastructure for the EU.
+All SDKs (Python, TypeScript, Java, C#, Go): **[trustbeat.eu/sdks](https://trustbeat.eu/sdks)**.
 
 ## Install
 
@@ -77,6 +78,26 @@ fmt.Println(job.ID, job.CombinedHash)
 proof, _ := c.AnchorLogWait(ctx, job.ID, nil)
 fmt.Println(proof.VerificationStatus) // "VERIFIED"
 ```
+
+## Webhooks
+
+If your account has a webhook secret configured, every delivery is signed with
+an `X-TrustBeat-Signature` header. Verify it with the raw request body —
+before any JSON parsing:
+
+```go
+ok, err := trustbeat.VerifyWebhookSignature(rawBody, r.Header.Get("X-TrustBeat-Signature"), webhookSecret, nil)
+if err != nil || !ok {
+    http.Error(w, "invalid webhook signature", http.StatusUnauthorized)
+    return
+}
+```
+
+Rejects replays older than 5 minutes by default (`WebhookVerifyOptions.Tolerance`
+to override).
+
+Portable proof bundles for offline verification: `ExportAiDecision(ctx, id)`,
+`ExportVerification(ctx, id)`, `ExportLog(ctx, id)` — each returns raw JSON bundle bytes.
 
 ## Requirements
 

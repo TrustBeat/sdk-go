@@ -686,6 +686,44 @@ func TestExportLogReturnsBytes(t *testing.T) {
 	}
 }
 
+func TestExportAiDecisionReturnsBytes(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		writeJSON(w, 200, `{"bundle_type":"trustbeat.ai.proof","id":"dec-1"}`)
+	}))
+	defer srv.Close()
+	blob, err := newClient(t, srv).ExportAiDecision(context.Background(), "dec-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(blob), "trustbeat.ai.proof") {
+		t.Errorf("bundle = %s", blob)
+	}
+	if gotPath != "/v1/ai/decisions/dec-1/export" {
+		t.Errorf("path = %s", gotPath)
+	}
+}
+
+func TestExportVerificationReturnsBytes(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		writeJSON(w, 200, `{"bundle_type":"trustbeat.verification.proof","id":"ver-1"}`)
+	}))
+	defer srv.Close()
+	blob, err := newClient(t, srv).ExportVerification(context.Background(), "ver-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(blob), "trustbeat.verification.proof") {
+		t.Errorf("bundle = %s", blob)
+	}
+	if gotPath != "/v1/verify/ver-1/export" {
+		t.Errorf("path = %s", gotPath)
+	}
+}
+
 func TestSubmitAuditEventsSendsBareArray(t *testing.T) {
 	var body []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

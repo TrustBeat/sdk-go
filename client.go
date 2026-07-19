@@ -31,7 +31,7 @@ import (
 
 const (
 	defaultBaseURL = "https://api.trustbeat.eu/v1"
-	sdkVersion     = "0.2.0"
+	sdkVersion     = "0.3.0"
 )
 
 // Client is the TrustBeat API client. Create with NewClient.
@@ -1140,6 +1140,27 @@ func (c *Client) ListLogs(ctx context.Context, params url.Values) ([]LogAnchorLi
 		items[i] = out.Logs[i].toModel()
 	}
 	return items, nil
+}
+
+// ExportAiDecision downloads a portable AI Act proof bundle (bundle_type
+// "trustbeat.ai.proof") and returns the raw JSON bundle bytes.
+func (c *Client) ExportAiDecision(ctx context.Context, trackingID string) ([]byte, error) {
+	raw, _, err := c.getRaw(ctx, "/ai/decisions/"+url.PathEscape(trackingID)+"/export")
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// ExportVerification downloads a portable verification proof bundle
+// (bundle_type "trustbeat.verification.proof") and returns the raw JSON
+// bundle bytes.
+func (c *Client) ExportVerification(ctx context.Context, trackingID string) ([]byte, error) {
+	raw, _, err := c.getRaw(ctx, "/verify/"+url.PathEscape(trackingID)+"/export")
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 // ExportLog downloads a portable NIS2 log proof bundle (bundle_type
