@@ -3,7 +3,11 @@ package trustbeat
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -95,5 +99,80 @@ func TestRFC6962LeftSiblingAppliesNodePrefix(t *testing.T) {
 	ok, err := Verify(proofWith(upstreamEntry, upstreamRoot2, path, RFC6962SHA256))
 	if err != nil || !ok {
 		t.Fatalf("want valid, got ok=%v err=%v", ok, err)
+	}
+}
+
+// ── Shared RFC 6962 fixture ──────────────────────────────────────────────────
+//
+// tests/fixtures/rfc6962-proofs.json is checked by the Scala engine and by every
+// other SDK, so this pins cross-implementation agreement rather than
+// self-consistency.
+
+type fixtureDoc struct {
+	MerkleRoot string `json:"merkle_root"`
+	Proofs     []struct {
+		Hash            string `json:"hash"`
+		LeafIndex       int    `json:"leaf_index"`
+		MerkleRoot      string `json:"merkle_root"`
+		MerkleAlgorithm string `json:"merkle_algorithm"`
+		ProofPath       []struct {
+			Sibling string `json:"sibling"`
+			Side    string `json:"side"`
+		} `json:"proof_path"`
+	} `json:"proofs"`
+}
+
+func loadFixture(t *testing.T) fixtureDoc {
+	t.Helper()
+	dir, _ := os.Getwd()
+	for i := 0; i < 8; i++ {
+		f := filepath.Join(dir, "tests", "fixtures", "rfc6962-proofs.json")
+		if raw, err := os.ReadFile(f); err == nil {
+			var doc fixtureDoc
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				t.Fatalf("fixture parse: %v", err)
+			}
+			return doc
+		}
+		dir = filepath.Dir(dir)
+	}
+	t.Fatal("rfc6962-proofs.json not found")
+	return fixtureDoc{}
+}
+
+func fixtureProof(p struct {
+	Hash            string `json:"hash"`
+	LeafIndex       int    `json:"leaf_index"`
+	MerkleRoot      string `json:"merkle_root"`
+	MerkleAlgorithm string `json:"merkle_algorithm"`
+	ProofPath       []struct {
+		Sibling string `json:"sibling"`
+		Side    string `json:"side"`
+	} `json:"proof_path"`
+}, hash string) *AnchorProof {
+	steps := make([]ProofStep, len(p.ProofPath))
+	for i, s := range p.ProofPath {
+		steps[i] = ProofStep{Sibling: s.Sibling, Side: s.Side}
+	}
+	return proofWith(hash, p.MerkleRoot, steps, p.MerkleAlgorithm)
+}
+
+func TestSharedFixtureProofsVerify(t *testing.T) {
+	doc := loadFixture(t)
+	for _, p := range doc.Proofs {
+		ok, err := Verify(fixtureProof(p, p.Hash))
+		if err != nil || !ok {
+			t.Fatalf("leaf %d: ok=%v err=%v", p.LeafIndex, ok, err)
+		}
+	}
+}
+
+func TestSharedFixtureTamperedProofFails(t *testing.T) {
+	// Guards against the suite passing because verification is a no-op.
+	doc := loadFixture(t)
+	p := doc.Proofs[0]
+	ok, err := Verify(fixtureProof(p, strings.Repeat("00", 32)))
+	if err != nil || ok {
+		t.Fatalf("want invalid, got ok=%v err=%v", ok, err)
 	}
 }
