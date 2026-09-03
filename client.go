@@ -31,7 +31,7 @@ import (
 
 const (
 	defaultBaseURL = "https://api.trustbeat.eu/v1"
-	sdkVersion     = "0.3.0"
+	sdkVersion     = "0.4.0"
 )
 
 // Client is the TrustBeat API client. Create with NewClient.
@@ -950,8 +950,10 @@ type proofWire struct {
 	TSASerial     string          `json:"tsa_serial"`
 	Provider      string          `json:"provider"`
 	AnchoredAt    string          `json:"anchored_at"`
-	ClientRef     *string         `json:"client_ref"`
-	Description   *string         `json:"description"`
+	ClientRef       *string       `json:"client_ref"`
+	Description     *string       `json:"description"`
+	MerkleAlgorithm string        `json:"merkle_algorithm"`
+	TreeSize        int           `json:"tree_size"`
 }
 
 func (w *proofWire) toModel() *AnchorProof {
@@ -973,6 +975,12 @@ func (w *proofWire) toModel() *AnchorProof {
 		TSASerial:     w.TSASerial,
 		Provider:      w.Provider,
 		AnchoredAt:    w.AnchoredAt,
+		TreeSize:      w.TreeSize,
+	}
+	if w.MerkleAlgorithm != "" {
+		p.MerkleAlgorithm = w.MerkleAlgorithm
+	} else {
+		p.MerkleAlgorithm = LegacySHA256
 	}
 	if w.ClientRef != nil {
 		p.ClientRef = *w.ClientRef

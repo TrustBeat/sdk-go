@@ -7,14 +7,18 @@ package trustbeat
 // Returns a *VerificationError if the proof data is malformed (bad hex, unknown side).
 // Returns false (with nil error) if the computed root does not match the stored root.
 //
-// Algorithm (mirrors MerkleEngine.scala and all other SDK implementations):
+// The fold depends on the construction the proof declares in MerkleAlgorithm:
 //
-//	parent = SHA-256(left_child_bytes || right_child_bytes)
+//	trustbeat-legacy-sha256  leaf = your hash, parent = SHA-256(left || right)
+//	rfc6962-sha256           leaf = SHA-256(0x00 || your hash),
+//	                         parent = SHA-256(0x01 || left || right)
 //
-// The Side field in each ProofStep gives the sibling's position:
+// In both, the Side field gives the sibling's position:
 //
-//	"left"  → sibling is left  → SHA-256(sibling || current)
-//	"right" → sibling is right → SHA-256(current || sibling)
+//	"left"  → sibling is left  → hash over (sibling, current)
+//	"right" → sibling is right → hash over (current, sibling)
+//
+// A proof with an empty MerkleAlgorithm predates the field and is legacy.
 
 import (
 	"crypto/sha256"
@@ -25,11 +29,36 @@ import (
 
 // Verify verifies a Merkle inclusion proof locally — no network call.
 func Verify(proof *AnchorProof) (bool, error) {
+	algorithm := proof.MerkleAlgorithm
+	if algorithm == "" {
+		algorithm = LegacySHA256
+	}
+	var leafPrefix, nodePrefix []byte
+	switch algorithm {
+	case LegacySHA256:
+		// no domain separation
+	case RFC6962SHA256:
+		leafPrefix, nodePrefix = []byte{0x00}, []byte{0x01}
+	default:
+		return false, &UnsupportedAlgorithmError{TrustBeatError{
+			Message: fmt.Sprintf(
+				"unsupported merkle_algorithm %q: this SDK understands %q and %q; "+
+					"upgrade the SDK, or verify via the API",
+				algorithm, LegacySHA256, RFC6962SHA256),
+		}}
+	}
+
 	current, err := hex.DecodeString(proof.Hash)
 	if err != nil {
 		return false, &VerificationError{TrustBeatError{
 			Message: fmt.Sprintf("invalid leaf hash hex: %q", proof.Hash),
 		}}
+	}
+	if len(leafPrefix) > 0 {
+		h := sha256.New()
+		h.Write(leafPrefix)
+		h.Write(current)
+		current = h.Sum(nil)
 	}
 
 	for i, step := range proof.ProofPath {
@@ -40,13 +69,14 @@ func Verify(proof *AnchorProof) (bool, error) {
 			}}
 		}
 		h := sha256.New()
+		h.Write(nodePrefix)
 		switch step.Side {
 		case "left":
-			// sibling is the left child → SHA-256(sibling || current)
+			// sibling is the left child
 			h.Write(sibling)
 			h.Write(current)
 		case "right":
-			// sibling is the right child → SHA-256(current || sibling)
+			// sibling is the right child
 			h.Write(current)
 			h.Write(sibling)
 		default:

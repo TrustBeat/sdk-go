@@ -111,3 +111,18 @@ Full API reference and guides at [api.trustbeat.eu/docs](https://api.trustbeat.e
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+
+### Merkle algorithm
+
+Every proof declares how it must be folded, in `proof.MerkleAlgorithm`:
+
+| Value | Construction |
+|---|---|
+| `trustbeat-legacy-sha256` | leaf = your hash, parent = `SHA-256(left \|\| right)` |
+| `rfc6962-sha256` | leaf = `SHA-256(0x00 \|\| hash)`, parent = `SHA-256(0x01 \|\| left \|\| right)` |
+
+`Verify` dispatches on it for you. A proof with an empty label was issued before
+the field existed and is legacy. An algorithm this SDK version does not implement
+returns an `*UnsupportedAlgorithmError` rather than `false` — "cannot check" is
+not "invalid".

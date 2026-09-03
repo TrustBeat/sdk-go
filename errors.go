@@ -31,3 +31,11 @@ type RateLimitError struct{ TrustBeatError }
 
 // VerificationError is returned when local Merkle proof verification fails.
 type VerificationError struct{ TrustBeatError }
+
+// UnsupportedAlgorithmError is returned when a proof declares a MerkleAlgorithm
+// this SDK version does not implement.
+//
+// It is deliberately not a VerificationError and never a false return: "I cannot
+// check this proof" must not be mistaken for "this proof is forged". Upgrade the
+// SDK, or verify server-side via the API.
+type UnsupportedAlgorithmError struct{ TrustBeatError }

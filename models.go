@@ -37,7 +37,25 @@ type AnchorProof struct {
 	AnchoredAt    string // ISO 8601
 	ClientRef     string // empty if not set
 	Description   string // empty if not set
+
+	// MerkleAlgorithm names the construction that produced MerkleRoot, and so how
+	// ProofPath must be folded. Proofs issued before this field existed omit it on
+	// the wire and are parsed as LegacySHA256.
+	MerkleAlgorithm string
+	// TreeSize is the number of leaves in the batch (RFC 6962 tree size); 0 when
+	// the API did not report it. Advisory under LegacySHA256.
+	TreeSize int
 }
+
+const (
+	// LegacySHA256 is the original TrustBeat tree: the leaf is your hash unchanged,
+	// parents are SHA-256(left || right), an odd node is duplicated.
+	LegacySHA256 = "trustbeat-legacy-sha256"
+
+	// RFC6962SHA256 is RFC 6962 / RFC 9162: leaves are SHA-256(0x00 || entry),
+	// parents are SHA-256(0x01 || left || right).
+	RFC6962SHA256 = "rfc6962-sha256"
+)
 
 // BatchSubmission is returned by AnchorBatch. The SubmissionID groups all items
 // so their status and proofs can be retrieved together.
