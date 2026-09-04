@@ -488,48 +488,50 @@ func (c *Client) ValidateCertificate(ctx context.Context, certBytes []byte) (*Ce
 
 type signatureDetailWire struct {
 	Index            int     `json:"index"`
-	SignerName        *string `json:"signer_name"`
-	SignerEmail       *string `json:"signer_email"`
-	SigningTime       *string `json:"signing_time"`
-	CertSerial        *string `json:"cert_serial"`
-	CertFingerprint   *string `json:"cert_fingerprint"`
-	CertIssuer        *string `json:"cert_issuer"`
-	Qualified         bool    `json:"qualified"`
-	OnEutl            bool    `json:"on_eutl"`
-	Qscd              bool    `json:"qscd"`
-	RevocationStatus  string  `json:"revocation_status"`
-	RevocationTime    *string `json:"revocation_time"`
-	OcspResponse      *string `json:"ocsp_response"`
-	SignatureLevel    string  `json:"signature_level"`
-	TimestampPresent  bool    `json:"timestamp_present"`
-	TimestampSerial   *string `json:"timestamp_serial"`
-	Verdict           string  `json:"verdict"`
+	SignerName       *string `json:"signer_name"`
+	SignerEmail      *string `json:"signer_email"`
+	SigningTime      *string `json:"signing_time"`
+	CertSerial       *string `json:"cert_serial"`
+	CertFingerprint  *string `json:"cert_fingerprint"`
+	CertIssuer       *string `json:"cert_issuer"`
+	Qualified        bool    `json:"qualified"`
+	OnEutl           bool    `json:"on_eutl"`
+	Qscd             bool    `json:"qscd"`
+	RevocationStatus string  `json:"revocation_status"`
+	RevocationTime   *string `json:"revocation_time"`
+	OcspResponse     *string `json:"ocsp_response"`
+	SignatureLevel   string  `json:"signature_level"`
+	TimestampPresent bool    `json:"timestamp_present"`
+	TimestampSerial  *string `json:"timestamp_serial"`
+	Verdict          string  `json:"verdict"`
 }
 
 func derefStr(p *string) string {
-	if p == nil { return "" }
+	if p == nil {
+		return ""
+	}
 	return *p
 }
 
 func (w *signatureDetailWire) toModel() SignatureDetail {
 	return SignatureDetail{
 		Index:            w.Index,
-		SignerName:        derefStr(w.SignerName),
-		SignerEmail:       derefStr(w.SignerEmail),
-		SigningTime:       derefStr(w.SigningTime),
-		CertSerial:        derefStr(w.CertSerial),
-		CertFingerprint:   derefStr(w.CertFingerprint),
-		CertIssuer:        derefStr(w.CertIssuer),
-		Qualified:         w.Qualified,
-		OnEutl:            w.OnEutl,
-		Qscd:              w.Qscd,
-		RevocationStatus:  w.RevocationStatus,
-		RevocationTime:    derefStr(w.RevocationTime),
-		OcspResponse:      derefStr(w.OcspResponse),
-		SignatureLevel:    w.SignatureLevel,
-		TimestampPresent:  w.TimestampPresent,
-		TimestampSerial:   derefStr(w.TimestampSerial),
-		Verdict:           w.Verdict,
+		SignerName:       derefStr(w.SignerName),
+		SignerEmail:      derefStr(w.SignerEmail),
+		SigningTime:      derefStr(w.SigningTime),
+		CertSerial:       derefStr(w.CertSerial),
+		CertFingerprint:  derefStr(w.CertFingerprint),
+		CertIssuer:       derefStr(w.CertIssuer),
+		Qualified:        w.Qualified,
+		OnEutl:           w.OnEutl,
+		Qscd:             w.Qscd,
+		RevocationStatus: w.RevocationStatus,
+		RevocationTime:   derefStr(w.RevocationTime),
+		OcspResponse:     derefStr(w.OcspResponse),
+		SignatureLevel:   w.SignatureLevel,
+		TimestampPresent: w.TimestampPresent,
+		TimestampSerial:  derefStr(w.TimestampSerial),
+		Verdict:          w.Verdict,
 	}
 }
 
@@ -585,7 +587,7 @@ type certValidationWire struct {
 	RevocationStatus string   `json:"revocation_status"`
 	RevocationTime   *string  `json:"revocation_time"`
 	KeyUsage         []string `json:"key_usage"`
-	Valid             bool     `json:"valid"`
+	Valid            bool     `json:"valid"`
 	ValidatedAt      string   `json:"validated_at"`
 }
 
@@ -602,7 +604,7 @@ func (w *certValidationWire) toModel() *CertificateValidationResult {
 		RevocationStatus: w.RevocationStatus,
 		RevocationTime:   derefStr(w.RevocationTime),
 		KeyUsage:         w.KeyUsage,
-		Valid:             w.Valid,
+		Valid:            w.Valid,
 		ValidatedAt:      w.ValidatedAt,
 	}
 }
@@ -642,6 +644,10 @@ type auditEventProofWire struct {
 	MerklePath    []auditProofStepWire `json:"merkle_path"`
 	AnchoredAt    string               `json:"anchored_at"`
 	Status        string               `json:"status"` // "pending" when not yet anchored
+	// Absent from servers older than API 1.46; see AuditEventProof.
+	MerkleRoot      string `json:"merkle_root"`
+	TreeSize        int    `json:"tree_size"`
+	MerkleAlgorithm string `json:"merkle_algorithm"`
 }
 
 func (w *auditEventProofWire) toModel() *AuditEventProof {
@@ -649,9 +655,14 @@ func (w *auditEventProofWire) toModel() *AuditEventProof {
 	for i, s := range w.MerklePath {
 		path[i] = AuditProofStep{Sibling: s.Sibling, Side: s.Side}
 	}
+	algorithm := w.MerkleAlgorithm
+	if algorithm == "" {
+		algorithm = LegacySHA256 // absent means legacy, as everywhere else
+	}
 	return &AuditEventProof{
 		EventID: w.EventID, CanonicalHash: w.CanonicalHash, BatchID: w.BatchID,
 		LeafIndex: w.LeafIndex, MerklePath: path, AnchoredAt: w.AnchoredAt,
+		MerkleRoot: w.MerkleRoot, TreeSize: w.TreeSize, MerkleAlgorithm: algorithm,
 	}
 }
 
@@ -938,22 +949,22 @@ type proofStepWire struct {
 }
 
 type proofWire struct {
-	ID            string          `json:"id"`
-	Hash          string          `json:"hash"`
-	HashAlgorithm string          `json:"hash_algorithm"`
-	BatchID       string          `json:"batch_id"`
-	LeafIndex     int             `json:"leaf_index"`
-	MerkleRoot    string          `json:"merkle_root"`
-	ProofPath     []proofStepWire `json:"proof_path"`
-	Token         string          `json:"token"` // base64-encoded DER
-	TokenFormat   string          `json:"token_format"`
-	TSASerial     string          `json:"tsa_serial"`
-	Provider      string          `json:"provider"`
-	AnchoredAt    string          `json:"anchored_at"`
-	ClientRef       *string       `json:"client_ref"`
-	Description     *string       `json:"description"`
-	MerkleAlgorithm string        `json:"merkle_algorithm"`
-	TreeSize        int           `json:"tree_size"`
+	ID              string          `json:"id"`
+	Hash            string          `json:"hash"`
+	HashAlgorithm   string          `json:"hash_algorithm"`
+	BatchID         string          `json:"batch_id"`
+	LeafIndex       int             `json:"leaf_index"`
+	MerkleRoot      string          `json:"merkle_root"`
+	ProofPath       []proofStepWire `json:"proof_path"`
+	Token           string          `json:"token"` // base64-encoded DER
+	TokenFormat     string          `json:"token_format"`
+	TSASerial       string          `json:"tsa_serial"`
+	Provider        string          `json:"provider"`
+	AnchoredAt      string          `json:"anchored_at"`
+	ClientRef       *string         `json:"client_ref"`
+	Description     *string         `json:"description"`
+	MerkleAlgorithm string          `json:"merkle_algorithm"`
+	TreeSize        int             `json:"tree_size"`
 }
 
 func (w *proofWire) toModel() *AnchorProof {
@@ -1082,7 +1093,6 @@ func (w *aiDecisionProofWire) toModel() *AiDecisionProof {
 	}
 	return p
 }
-
 
 // ── Tamper-Evident Logs (NIS2) ──────────────────────────────────────────────────
 

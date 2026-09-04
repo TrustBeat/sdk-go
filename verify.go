@@ -96,3 +96,35 @@ func Verify(proof *AnchorProof) (bool, error) {
 
 	return subtle.ConstantTimeCompare(current, expected) == 1, nil
 }
+
+// VerifyAuditEvent verifies an audit event's Merkle inclusion proof locally —
+// no network call. The audit counterpart of Verify, for the shape that names the
+// leaf CanonicalHash and the path MerklePath.
+//
+// Returns true if the proof is cryptographically valid, false (with nil error)
+// if the computed root does not match.
+//
+// Returns an *IncompleteProofError when the proof carries no MerkleRoot: servers
+// before API 1.46 did not send one, so there is nothing to fold against. That is
+// "cannot check", never "invalid". Returns *UnsupportedAlgorithmError and
+// *VerificationError on the same terms as Verify.
+func VerifyAuditEvent(proof *AuditEventProof) (bool, error) {
+	if proof.MerkleRoot == "" {
+		return false, &IncompleteProofError{TrustBeatError{
+			Message: "this audit event proof has no merkle_root, so it cannot be folded " +
+				"locally; the server that issued it predates API 1.46 — verify it " +
+				"server-side via the API, or re-fetch it from an upgraded server",
+		}}
+	}
+	// Reuse the anchor fold: the two shapes differ only in field names.
+	path := make([]ProofStep, len(proof.MerklePath))
+	for i, s := range proof.MerklePath {
+		path[i] = ProofStep{Sibling: s.Sibling, Side: s.Side}
+	}
+	return Verify(&AnchorProof{
+		Hash:            proof.CanonicalHash,
+		MerkleRoot:      proof.MerkleRoot,
+		ProofPath:       path,
+		MerkleAlgorithm: proof.MerkleAlgorithm,
+	})
+}

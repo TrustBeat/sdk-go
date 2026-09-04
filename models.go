@@ -83,20 +83,20 @@ type AiTimeEnvelope struct {
 // AiDecisionMetadata describes an AI decision for EU AI Act Article 12 anchoring.
 // ModelID, SystemName, RiskCategory, DecisionType, HumanOversight, and TimeEnvelope are required.
 type AiDecisionMetadata struct {
-	ModelID        string         // model identifier, e.g. "claude-3-5-sonnet-20241022"
-	SystemName     string         // AI system name, e.g. "cv-screening-v2"
-	RiskCategory   string         // AI Act Annex III category, e.g. "employment"
-	DecisionType   string         // "classification", "ranking", "recommendation", etc.
-	HumanOversight bool           // true if human oversight (AI Act Article 14) was in place
+	ModelID        string // model identifier, e.g. "claude-3-5-sonnet-20241022"
+	SystemName     string // AI system name, e.g. "cv-screening-v2"
+	RiskCategory   string // AI Act Annex III category, e.g. "employment"
+	DecisionType   string // "classification", "ranking", "recommendation", etc.
+	HumanOversight bool   // true if human oversight (AI Act Article 14) was in place
 	TimeEnvelope   AiTimeEnvelope
-	ModelVersion        string         // optional — additional version string
-	OperatorID          string         // optional — identifier of the operator/process
-	DeploymentEnv       string         // optional — "production", "staging", "testing"
+	ModelVersion   string // optional — additional version string
+	OperatorID     string // optional — identifier of the operator/process
+	DeploymentEnv  string // optional — "production", "staging", "testing"
 	// Art. 12 traceability fields — optional, recommended for full compliance
-	ExternalRef         string         // optional — operator's own case/record ID
-	DecisionOutcome     string         // optional — semantic result, e.g. "rejected"
-	ModelArtifactHash   string         // optional — SHA-256 of deployed model weights
-	DataSubjectCategory string         // optional — e.g. "job_applicant"
+	ExternalRef         string // optional — operator's own case/record ID
+	DecisionOutcome     string // optional — semantic result, e.g. "rejected"
+	ModelArtifactHash   string // optional — SHA-256 of deployed model weights
+	DataSubjectCategory string // optional — e.g. "job_applicant"
 }
 
 // AiDecisionJob is returned immediately (HTTP 202) when an AI decision is enqueued.
@@ -129,22 +129,22 @@ type AiDecisionProof struct {
 // SignatureDetail holds the per-signature result within a VerificationReport.
 type SignatureDetail struct {
 	Index            int
-	SignerName        string
-	SignerEmail       string
-	SigningTime       string
-	CertSerial        string
-	CertFingerprint   string
-	CertIssuer        string
-	Qualified         bool
-	OnEutl            bool
-	Qscd              bool
-	RevocationStatus  string // "GOOD" | "REVOKED"
-	RevocationTime    string
-	OcspResponse      string
-	SignatureLevel    string // e.g. "B-LT", "B-LTA"
-	TimestampPresent  bool
-	TimestampSerial   string
-	Verdict           string // SignatureVerdict value
+	SignerName       string
+	SignerEmail      string
+	SigningTime      string
+	CertSerial       string
+	CertFingerprint  string
+	CertIssuer       string
+	Qualified        bool
+	OnEutl           bool
+	Qscd             bool
+	RevocationStatus string // "GOOD" | "REVOKED"
+	RevocationTime   string
+	OcspResponse     string
+	SignatureLevel   string // e.g. "B-LT", "B-LTA"
+	TimestampPresent bool
+	TimestampSerial  string
+	Verdict          string // SignatureVerdict value
 }
 
 // VerificationReport is the full eIDAS signature verification report returned by VerifySignature.
@@ -179,7 +179,7 @@ type CertificateValidationResult struct {
 	RevocationStatus string
 	RevocationTime   string
 	KeyUsage         []string
-	Valid             bool
+	Valid            bool
 	ValidatedAt      string // ISO 8601
 }
 
@@ -212,6 +212,14 @@ type AuditEventProof struct {
 	LeafIndex     int
 	MerklePath    []AuditProofStep
 	AnchoredAt    string // ISO 8601
+
+	// The three below arrived in API 1.46. They are zero-valued against an older
+	// server, which sends none of them, and this SDK must keep working against it
+	// — an empty MerkleRoot is what VerifyAuditEvent reports as "cannot check"
+	// rather than "invalid".
+	MerkleRoot      string
+	TreeSize        int
+	MerkleAlgorithm string
 }
 
 // AuditExportJob is returned immediately (202) when ExportAuditEvents is called.
@@ -222,7 +230,6 @@ type AuditExportJob struct {
 	EventCount int
 	Error      string
 }
-
 
 // ── Tamper-Evident Logs (NIS2) ─────────────────────────────────────────────────
 

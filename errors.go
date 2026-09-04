@@ -32,6 +32,16 @@ type RateLimitError struct{ TrustBeatError }
 // VerificationError is returned when local Merkle proof verification fails.
 type VerificationError struct{ TrustBeatError }
 
+// IncompleteProofError is returned when a proof does not carry the fields needed
+// to check it locally.
+//
+// Audit event proofs from servers older than API 1.46 have no MerkleRoot, so
+// there is nothing to fold the path against. Like UnsupportedAlgorithmError it is
+// deliberately not a VerificationError and never a false return: "I cannot check
+// this proof" must not be mistaken for "this proof is forged". Verify server-side
+// via the API, or upgrade the server.
+type IncompleteProofError struct{ TrustBeatError }
+
 // UnsupportedAlgorithmError is returned when a proof declares a MerkleAlgorithm
 // this SDK version does not implement.
 //

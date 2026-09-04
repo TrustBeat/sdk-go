@@ -126,3 +126,26 @@ Every proof declares how it must be folded, in `proof.MerkleAlgorithm`:
 the field existed and is legacy. An algorithm this SDK version does not implement
 returns an `*UnsupportedAlgorithmError` rather than `false` — "cannot check" is
 not "invalid".
+
+### Audit event proofs
+
+`VerifyAuditEvent` folds an audit event proof the same way:
+
+```go
+proof, err := c.GetAuditEventProof(ctx, eventID)
+if err != nil { log.Fatal(err) }
+
+ok, err := trustbeat.VerifyAuditEvent(proof)
+var incomplete *trustbeat.IncompleteProofError
+if errors.As(err, &incomplete) {
+    // The server predates API 1.46 and sent no MerkleRoot, so there is nothing
+    // to fold against. The proof is not invalid — verify it server-side instead.
+} else if err != nil {
+    log.Fatal(err)
+} else {
+    fmt.Println("valid:", ok)
+}
+```
+
+Treating that error as a failed proof would be wrong: it means "cannot check",
+not "tampered".

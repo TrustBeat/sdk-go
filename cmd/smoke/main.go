@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -278,7 +279,22 @@ func main() {
 		if !found {
 			fail("verify-audit: %s not returned by ListAuditEvents", id)
 		}
-		fmt.Printf("OK audit id=%s batch=%.12s… leaf=%d\n", id, proof.BatchID, proof.LeafIndex)
+		// Actually fold the path — everything above is structure. A server before
+		// API 1.46 sends no MerkleRoot, which the SDK reports as "cannot check".
+		verdict := ""
+		ok, vErr := tb.VerifyAuditEvent(proof)
+		var incomplete *tb.IncompleteProofError
+		switch {
+		case errors.As(vErr, &incomplete):
+			verdict = "unverifiable (server predates API 1.46)"
+		case vErr != nil:
+			fail("verify-audit: %v", vErr)
+		case !ok:
+			fail("verify-audit: Merkle verification FAILED for %s", id)
+		default:
+			verdict = fmt.Sprintf("verified algo=%s size=%d", proof.MerkleAlgorithm, proof.TreeSize)
+		}
+		fmt.Printf("OK audit id=%s batch=%.12s… leaf=%d %s\n", id, proof.BatchID, proof.LeafIndex, verdict)
 
 	case "verify-sig":
 		doc, err := os.ReadFile(os.Getenv("TB_SIG_DOC"))
