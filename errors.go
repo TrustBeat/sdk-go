@@ -1,6 +1,9 @@
 package trustbeat
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // TrustBeatError is the base error type for all SDK errors.
 type TrustBeatError struct {
@@ -26,8 +29,15 @@ type NotFoundError struct{ TrustBeatError }
 // QuotaError is returned for HTTP 402 or QUOTA_EXCEEDED.
 type QuotaError struct{ TrustBeatError }
 
-// RateLimitError is returned for HTTP 429.
-type RateLimitError struct{ TrustBeatError }
+// RateLimitError is returned for HTTP 429, once the client's automatic retries
+// (see WithMaxRetries) are spent. A refused submission was not queued, so retrying
+// it can never anchor a hash twice.
+type RateLimitError struct {
+	TrustBeatError
+	// RetryAfter is how long the server asked to wait before the next attempt
+	// (the Retry-After header); zero when it sent none.
+	RetryAfter time.Duration
+}
 
 // VerificationError is returned when local Merkle proof verification fails.
 type VerificationError struct{ TrustBeatError }

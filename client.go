@@ -25,13 +25,20 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
 	defaultBaseURL = "https://api.trustbeat.eu/v1"
-	sdkVersion     = "0.4.0"
+	sdkVersion     = "0.5.0"
+
+	// MaxBatchSize is the most hashes one AnchorBatch call may carry — the API's limit.
+	MaxBatchSize = 1000
+
+	// maxRetryWait: a 429 asking to wait longer than this is returned at once rather than waited out.
+	maxRetryWait = 60 * time.Second
 )
 
 // Client is the TrustBeat API client. Create with NewClient.
@@ -40,6 +47,9 @@ type Client struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
+	maxRetries int
+	// sleep waits between 429 retries, returning early with ctx.Err() on cancellation. Replaced in tests.
+	sleep func(ctx context.Context, d time.Duration) error
 }
 
 // Option is a functional option for NewClient.
@@ -63,6 +73,25 @@ func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Client) { c.httpClient = hc }
 }
 
+// WithMaxRetries sets how many times a rate-limited (HTTP 429) request is retried,
+// waiting the Retry-After the server sends (1 s, 2 s, 4 s … if it sends none).
+// 0 disables retrying. Default: 2. Only 429 is retried: the API refuses a
+// rate-limited submission before queuing it, so a retry cannot anchor a hash twice.
+func WithMaxRetries(n int) Option {
+	return func(c *Client) { c.maxRetries = n }
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
 // NewClient creates a TrustBeat API client.
 // apiKey must be a non-empty "tb_live_..." or "tb_test_..." key.
 func NewClient(apiKey string, opts ...Option) (*Client, error) {
@@ -73,9 +102,14 @@ func NewClient(apiKey string, opts ...Option) (*Client, error) {
 		apiKey:     apiKey,
 		baseURL:    defaultBaseURL,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		maxRetries: 2,
+		sleep:      sleepCtx,
 	}
 	for _, o := range opts {
 		o(c)
+	}
+	if c.maxRetries < 0 {
+		return nil, fmt.Errorf("trustbeat: maxRetries must not be negative")
 	}
 	return c, nil
 }
@@ -114,15 +148,17 @@ func (c *Client) Anchor(ctx context.Context, sha256Hex string, opts *AnchorOptio
 	return job.toModel(), nil
 }
 
-// AnchorBatch submits up to 100 SHA-256 hashes in a single request.
+// AnchorBatch submits up to MaxBatchSize (1,000) SHA-256 hashes in a single request.
+// The submission is all-or-nothing: if the call fails, none of the hashes was queued.
+// Servers deployed before 2026-09-26 accept at most 100 and answer a larger batch with 400.
 // Returns a *BatchSubmission grouping all items under a single SubmissionID.
 // Returns nil (no error) for an empty input slice.
 func (c *Client) AnchorBatch(ctx context.Context, hashes []string, opts *AnchorOptions) (*BatchSubmission, error) {
 	if len(hashes) == 0 {
 		return &BatchSubmission{}, nil
 	}
-	if len(hashes) > 100 {
-		return nil, fmt.Errorf("trustbeat: AnchorBatch accepts at most 100 hashes per call")
+	if len(hashes) > MaxBatchSize {
+		return nil, fmt.Errorf("trustbeat: AnchorBatch accepts at most %d hashes per call", MaxBatchSize)
 	}
 	items := make([]map[string]any, len(hashes))
 	for i, h := range hashes {
@@ -812,19 +848,44 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, string, error
 		return nil, "", fmt.Errorf("trustbeat: read body: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, "", mapHTTPError(resp.StatusCode, raw)
+		return nil, "", mapHTTPError(resp.StatusCode, raw, resp.Header)
 	}
 	return raw, resp.Header.Get("Content-Type"), nil
 }
 
+// do sends one API call, retrying HTTP 429 up to maxRetries times; any other outcome is returned.
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
-	var reqBody io.Reader
+	var payload []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("trustbeat: marshal: %w", err)
 		}
-		reqBody = bytes.NewReader(b)
+		payload = b
+	}
+	for attempt := 0; ; attempt++ {
+		err := c.doOnce(ctx, method, path, payload, out)
+		var rl *RateLimitError
+		if !errors.As(err, &rl) || attempt >= c.maxRetries {
+			return err
+		}
+		wait := rl.RetryAfter
+		if wait == 0 {
+			wait = time.Duration(1<<attempt) * time.Second
+		}
+		if wait > maxRetryWait {
+			return err
+		}
+		if serr := c.sleep(ctx, wait); serr != nil {
+			return serr
+		}
+	}
+}
+
+func (c *Client) doOnce(ctx context.Context, method, path string, payload []byte, out any) error {
+	var reqBody io.Reader
+	if payload != nil {
+		reqBody = bytes.NewReader(payload)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
@@ -834,7 +895,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "trustbeat-go/"+sdkVersion)
-	if body != nil {
+	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
@@ -850,7 +911,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return mapHTTPError(resp.StatusCode, raw)
+		return mapHTTPError(resp.StatusCode, raw, resp.Header)
 	}
 
 	if out != nil {
@@ -891,7 +952,17 @@ func withFileDesc(opts *AnchorOptions, path string) *AnchorOptions {
 	return merged
 }
 
-func mapHTTPError(status int, body []byte) error {
+// retryAfter parses the Retry-After header as whole seconds; zero when absent or not a number.
+// TrustBeat sends seconds; the HTTP-date form is not used, so it falls back to backoff.
+func retryAfter(h http.Header) time.Duration {
+	secs, err := strconv.ParseFloat(strings.TrimSpace(h.Get("Retry-After")), 64)
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	return time.Duration(secs * float64(time.Second))
+}
+
+func mapHTTPError(status int, body []byte, header http.Header) error {
 	msg := fmt.Sprintf("HTTP %d", status)
 	var errCode string
 	var errResp struct {
@@ -915,7 +986,7 @@ func mapHTTPError(status int, body []byte) error {
 	case 404:
 		return &NotFoundError{base}
 	case 429:
-		return &RateLimitError{base}
+		return &RateLimitError{TrustBeatError: base, RetryAfter: retryAfter(header)}
 	default:
 		return &TrustBeatError{Message: msg, Status: status, ErrorCode: errCode}
 	}

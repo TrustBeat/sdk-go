@@ -186,15 +186,43 @@ func TestAnchorBatchEmptyReturnsEmptySubmission(t *testing.T) {
 	}
 }
 
-func TestAnchorBatchOver100ReturnsError(t *testing.T) {
-	c, _ := trustbeat.NewClient("tb_live_test")
-	hashes := make([]string, 101)
+func TestAnchorBatchOverMaxReturnsErrorWithoutRequest(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer srv.Close()
+	hashes := make([]string, trustbeat.MaxBatchSize+1)
 	for i := range hashes {
 		hashes[i] = strings.Repeat("a", 64)
 	}
-	_, err := c.AnchorBatch(context.Background(), hashes, nil)
+	_, err := newClient(t, srv).AnchorBatch(context.Background(), hashes, nil)
 	if err == nil {
-		t.Fatal("expected error for > 100 hashes")
+		t.Fatal("expected error for > MaxBatchSize hashes")
+	}
+	if called {
+		t.Error("no request should be sent")
+	}
+}
+
+func TestAnchorBatchSendsMaxInOneRequest(t *testing.T) {
+	var got int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Hashes []map[string]any `json:"hashes"`
+		}
+		json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+		got = len(body.Hashes)
+		writeJSON(w, 202, `{"submission_id":"sub_1","accepted":[],"total":1000}`)
+	}))
+	defer srv.Close()
+	hashes := make([]string, trustbeat.MaxBatchSize)
+	for i := range hashes {
+		hashes[i] = strings.Repeat("a", 64)
+	}
+	if _, err := newClient(t, srv).AnchorBatch(context.Background(), hashes, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got != trustbeat.MaxBatchSize {
+		t.Errorf("sent %d hashes, want %d", got, trustbeat.MaxBatchSize)
 	}
 }
 
@@ -498,7 +526,8 @@ func TestHTTP429ReturnsRateLimitError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := newClient(t, srv).Anchor(context.Background(), strings.Repeat("a", 64), nil)
+	c, _ := trustbeat.NewClient("tb_live_test", trustbeat.WithBaseURL(srv.URL+"/v1"), trustbeat.WithMaxRetries(0))
+	_, err := c.Anchor(context.Background(), strings.Repeat("a", 64), nil)
 	var rle *trustbeat.RateLimitError
 	if !errors.As(err, &rle) {
 		t.Errorf("expected *RateLimitError, got %T: %v", err, err)
