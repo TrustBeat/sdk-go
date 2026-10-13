@@ -107,6 +107,9 @@ now, _ := os.ReadFile("now.submission.json")
 report, err := c.VerifySignaturePreservation(ctx, rec.ID, now)
 fmt.Println(report.Result, report.Steps[0].Name, report.Steps[0].Result)
 pdf, err := c.VerifySignaturePreservationPDF(ctx, rec.ID, now)
+
+// Delete a record — final; the id is repeated as a guard, and the account is emailed
+_, err = c.DeleteSignaturePreservation(ctx, rec.ID, rec.ID)
 ```
 
 Verifying later works with the original file only: `trustbeat-signature extract` it again and pass that

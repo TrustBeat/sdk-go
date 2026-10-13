@@ -165,3 +165,27 @@ func TestVerifySignaturePreservationPDF(t *testing.T) {
 	}
 	sameJSON(t, c.body, []byte(spSubmission))
 }
+
+func TestDeleteSignaturePreservation(t *testing.T) {
+	srv, calls := spServer(t, 200, "application/json", `{"id":"01REC","deleted_at":"2026-10-13T11:00:00Z","peo_sha256":"dd"}`)
+	d, err := newClient(t, srv).DeleteSignaturePreservation(context.Background(), "01REC", "01REC")
+	if err != nil || (*calls)[0].method != http.MethodDelete || (*calls)[0].uri != "/v1/signature-preservation/01REC?confirm=01REC" ||
+		d.ID != "01REC" || d.DeletedAt != "2026-10-13T11:00:00Z" || d.PEOSHA256 != "dd" {
+		t.Fatalf("%v %+v %+v", err, d, *calls)
+	}
+}
+
+func TestDeleteSignaturePreservationErrors(t *testing.T) {
+	srv, _ := spServer(t, 400, "application/json", `{"error":{"code":"CONFIRMATION_REQUIRED","message":"Repeat the id"}}`)
+	_, err := newClient(t, srv).DeleteSignaturePreservation(context.Background(), "01REC", "01OTHER")
+	var te *trustbeat.TrustBeatError
+	if !errors.As(err, &te) || te.Status != 400 || te.ErrorCode != "CONFIRMATION_REQUIRED" {
+		t.Fatalf("%v", err)
+	}
+	srv2, _ := spServer(t, 404, "application/json", `{"error":{"code":"NOT_FOUND","message":"Record not found."}}`)
+	_, err = newClient(t, srv2).DeleteSignaturePreservation(context.Background(), "nope", "nope")
+	var nf *trustbeat.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("%v", err)
+	}
+}

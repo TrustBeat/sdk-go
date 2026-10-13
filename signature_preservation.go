@@ -128,6 +128,28 @@ func (c *Client) DownloadSignaturePreservationPackage(ctx context.Context, recor
 	return raw, err
 }
 
+// SignaturePreservationDeletion is a deleted record. Deletion is final; PEOSHA256 stays in its
+// batch's hash tree.
+type SignaturePreservationDeletion struct {
+	ID        string `json:"id"`
+	DeletedAt string `json:"deleted_at"`
+	PEOSHA256 string `json:"peo_sha256"`
+}
+
+// DeleteSignaturePreservation deletes a record before the end of its preservation period. Final: the
+// Preservation Evidence Object, the signatures and the record are removed and its evidence record is
+// no longer served; download the package first if you may need it. The account's email address is
+// notified. confirm must repeat recordID (a guard against deleting the wrong record); otherwise the
+// API answers 400 with ErrorCode "CONFIRMATION_REQUIRED".
+func (c *Client) DeleteSignaturePreservation(ctx context.Context, recordID, confirm string) (*SignaturePreservationDeletion, error) {
+	var d SignaturePreservationDeletion
+	path := "/signature-preservation/" + url.PathEscape(recordID) + "?confirm=" + url.QueryEscape(confirm)
+	if err := c.do(ctx, http.MethodDelete, path, nil, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 // VerifySignaturePreservation verifies a signed file presented now against its record: the
 // eight-step report. submission is `trustbeat-signature extract` of the file presented now. A file
 // that does not match gives a report with failed steps, not an error. Not counted against the quota.
