@@ -79,6 +79,40 @@ proof, _ := c.AnchorLogWait(ctx, job.ID, nil)
 fmt.Println(proof.VerificationStatus) // "VERIFIED"
 ```
 
+## Signature Preservation (not yet available)
+
+> **Not yet available** — the API answers `404` until the product is launched.
+
+Preserves the electronic signatures of a signed file (PAdES, XAdES, CAdES, ASiC-E, ASiC-S) for 30
+years. **The signed file never reaches TrustBeat, and this SDK does not read it:** the
+`trustbeat-signature` extractor reads it on your machine and writes a submission JSON (the signatures and the digests that
+bind them to the file), which the SDK sends unchanged.
+
+```bash
+trustbeat-signature extract contract.pdf --out contract.submission.json
+```
+
+```go
+submission, _ := os.ReadFile("contract.submission.json")
+
+rec, err := c.PreserveSignatures(ctx, submission, &trustbeat.PreserveOptions{ClientRef: "contract-17"}) // one anchor against the quota
+rec, err = c.GetSignaturePreservation(ctx, rec.ID) // Status: pending -> anchored -> preserved
+recs, err := c.ListSignaturePreservations(ctx, 50)
+
+pkg, err := c.DownloadSignaturePreservationPackage(ctx, rec.ID) // ZIP for offline verification
+os.WriteFile("package.zip", pkg, 0o644)
+
+// Years later: the file presented now, extracted again
+now, _ := os.ReadFile("now.submission.json")
+report, err := c.VerifySignaturePreservation(ctx, rec.ID, now)
+fmt.Println(report.Result, report.Steps[0].Name, report.Steps[0].Result)
+pdf, err := c.VerifySignaturePreservationPDF(ctx, rec.ID, now)
+```
+
+Verifying later works with the original file only: `trustbeat-signature extract` it again and pass that
+submission. A file that does not match is a report with failed steps, not an error. Offline, without
+TrustBeat: `trustbeat-signature verify contract.pdf --package package.zip`.
+
 ## Webhooks
 
 If your account has a webhook secret configured, every delivery is signed with
