@@ -3,7 +3,7 @@
 Qualified electronic timestamps and Merkle anchoring — eIDAS-compliant, over a simple API.
 
 Part of **[TrustBeat](https://trustbeat.eu)** — digital trust infrastructure for the EU.
-All SDKs (Python, TypeScript, Java, C#, Go): **[trustbeat.eu/sdks](https://trustbeat.eu/sdks)**.
+All SDKs (Python, TypeScript, Java, C#, Go): **[trustbeat.eu/en/sdks](https://trustbeat.eu/en/sdks)**.
 
 ## Install
 
