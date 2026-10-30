@@ -78,7 +78,8 @@ type PreserveOptions struct {
 //
 // submission is the JSON that `trustbeat-signature extract <file>` writes. It holds the signatures
 // and the digests binding them to the file; the signed file itself never reaches TrustBeat, and
-// this SDK does not read signed files. Counts as one anchor against the monthly quota. opts may be nil.
+// this SDK does not read signed files. Counts as one preserved file of the account's Signature Preservation
+// plan; without a plan it is a *QuotaError (402, SUBSCRIPTION_REQUIRED in its message). opts may be nil.
 func (c *Client) PreserveSignatures(ctx context.Context, submission []byte, opts *PreserveOptions) (*SignaturePreservationRecord, error) {
 	body, err := submissionBody(submission)
 	if err != nil {

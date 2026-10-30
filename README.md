@@ -95,7 +95,7 @@ trustbeat-signature extract contract.pdf --out contract.submission.json
 ```go
 submission, _ := os.ReadFile("contract.submission.json")
 
-rec, err := c.PreserveSignatures(ctx, submission, &trustbeat.PreserveOptions{ClientRef: "contract-17"}) // one anchor against the quota
+rec, err := c.PreserveSignatures(ctx, submission, &trustbeat.PreserveOptions{ClientRef: "contract-17"}) // one preserved file of your Signature Preservation plan
 rec, err = c.GetSignaturePreservation(ctx, rec.ID) // Status: pending -> anchored -> preserved
 recs, err := c.ListSignaturePreservations(ctx, 50)
 
@@ -115,6 +115,12 @@ _, err = c.DeleteSignaturePreservation(ctx, rec.ID, rec.ID)
 Verifying later works with the original file only: `trustbeat-signature extract` it again and pass that
 submission. A file that does not match is a report with failed steps, not an error. Offline, without
 TrustBeat: `trustbeat-signature verify contract.pdf --package package.zip`.
+
+Preserving needs a Signature Preservation subscription (Starter €19 / month for 100 files, Business €299 /
+month for 2,000; no free trial). Without one the call fails with HTTP 402 — `*trustbeat.QuotaError`, whose message
+says `SUBSCRIPTION_REQUIRED` and gives the billing link. Over the monthly allowance the file is still preserved
+and billed per file. It does not use Document Anchoring quota, and reading, downloading, verifying and
+deleting records never need a plan.
 
 ## Webhooks
 
