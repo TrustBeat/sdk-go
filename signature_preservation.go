@@ -12,7 +12,7 @@ import (
 	"strconv"
 )
 
-// ── Signature Preservation (not yet available: the API answers 404 until launch) ──
+// ── Signature Preservation ──
 
 // SignaturePreservationRecord is a preserved signed file (/v1/signature-preservation).
 //
