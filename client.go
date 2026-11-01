@@ -32,7 +32,7 @@ import (
 
 const (
 	defaultBaseURL = "https://api.trustbeat.eu/v1"
-	sdkVersion     = "0.5.0"
+	sdkVersion     = "0.6.0"
 
 	// MaxBatchSize is the most hashes one AnchorBatch call may carry — the API's limit.
 	MaxBatchSize = 1000
